@@ -12,8 +12,8 @@ class TestAssets(unittest.TestCase):
                        "PROGRESS.md", "needs-review"]:
             self.assertIn(marker, text, f"CLAUDE.md missing: {marker}")
 
-    def test_example_backlog_is_a_valid_brief(self):
-        doc = parse_spec((ROOT / "backlog" / "0001-example.md").read_text())
+    def test_example_is_a_valid_brief(self):
+        doc = parse_spec((ROOT / "examples" / "0001-example.md").read_text())
         self.assertEqual(validate_spec(doc, level="brief"), [])
 
     def test_brief_template_is_valid_brief(self):
