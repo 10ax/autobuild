@@ -6,7 +6,7 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=%h/autobuild
-Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=%h/.local/bin:%h/.cargo/bin:%h/.nvm/versions/node/v22.16.0/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/usr/bin/python3 -m autobuild --poll 300
 Restart=always
 RestartSec=30
