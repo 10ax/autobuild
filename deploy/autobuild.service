@@ -10,6 +10,12 @@ Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/usr/bin/python3 -m autobuild --poll 300
 Restart=always
 RestartSec=30
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+PrivateTmp=yes
+ReadWritePaths=%h/autobuild %h/.claude %h/.npm %h/.cache %h/.config %h/.tokensave %h/.local/state
 
 [Install]
 WantedBy=default.target
