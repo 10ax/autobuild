@@ -25,9 +25,14 @@ and the optional weekly reserve (`weekly_reserve_enabled` + `weekly_target_usd`)
   `PrivateTmp=yes`, etc.), which makes the OS enforce a read-only filesystem
   outside `ReadWritePaths`. On first supervised run, confirm `claude` can
   authenticate and that `npm install`/`tsc` work end-to-end; if a tool needs to
-  write to a directory not already listed in `ReadWritePaths=%h/autobuild
-  %h/.claude %h/.npm %h/.cache %h/.config %h/.tokensave %h/.local/state`, add
-  it there.
+  write to a path not already in `ReadWritePaths`, add it there. Note the
+  `claude` CLI writes `~/.claude.json` (a file *beside* the `~/.claude/`
+  directory) plus a `.claude.json.bak` — both are already listed, but if a
+  future CLI version writes other files in `$HOME` root you may see permission
+  errors. If `claude` still can't persist config under `ProtectSystem=strict`,
+  fall back to `ProtectSystem=true` (protects only `/usr`,`/boot`,`/etc`,
+  leaving `$HOME` writable while keeping `NoNewPrivileges` + the kernel
+  protections).
 - **Interpreter.** `ExecStart` uses `/usr/bin/python3`, which must be ≥3.11
   (the runner uses `tomllib`/`zoneinfo`). Adjust the `ExecStart` path if the
   host's default `python3` is older or lives elsewhere.
