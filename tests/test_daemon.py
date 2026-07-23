@@ -61,3 +61,20 @@ class TestDaemon(unittest.TestCase):
         )
         item = [i for i in scan_backlog(root / "backlog") if i.meta["slug"] == "alpha"][0]
         self.assertEqual(item.meta["status"], "needs-review")
+
+    def test_invalid_brief_diverted_to_needs_review_not_built(self):
+        root = _root()
+        # overwrite the example with an invalid brief: pending but NO slug
+        (root / "backlog" / "a.md").write_text(
+            '+++\nspec_version = "1.0"\ntitle = "x"\ntier = "script"\n'
+            'priority = 5\nstatus = "pending"\n+++\n## Intent\nx\n## Acceptance Criteria\nA1. x\n')
+        built = []
+        res = run_once(
+            Config(root=root, max_concurrency=1),
+            datetime(2026, 7, 23, 23, tzinfo=TZ), GovernorState(), root / "state",
+            builder=lambda *a, **k: built.append(1) or BuildResult(is_error=False, cost_usd=0.0),
+            verifier=lambda *a, **k: True,
+        )
+        self.assertEqual(built, [])  # builder never called on an invalid brief
+        item = [i for i in scan_backlog(root / "backlog")][0]
+        self.assertEqual(item.meta["status"], "needs-review")

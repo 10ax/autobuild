@@ -1,4 +1,4 @@
-import json, unittest
+import json, subprocess, unittest
 from pathlib import Path
 from autobuild.config import Config
 from autobuild.governor import Pace
@@ -56,3 +56,13 @@ class TestBuild(unittest.TestCase):
         r = run_build(Path("/b/x.md"), Path("/r/x"), "sonnet",
                       Pace("low", 1, False, "sonnet"), Config(root="/tmp"), runner=boom)
         self.assertTrue(r.is_error)
+
+    def test_verify_repo_survives_missing_tool(self):
+        def boom(*a, **k):
+            raise FileNotFoundError("npm not found")
+        self.assertFalse(verify_repo(Path("/r/x"), runner=boom))
+
+    def test_verify_repo_survives_hang(self):
+        def hang(*a, **k):
+            raise subprocess.TimeoutExpired(cmd="npm", timeout=1)
+        self.assertFalse(verify_repo(Path("/r/x"), runner=hang))

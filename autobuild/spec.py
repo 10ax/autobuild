@@ -29,7 +29,10 @@ def parse_spec(text: str) -> SpecDoc:
     m = _FRONT.match(text.lstrip("﻿").lstrip())
     if not m:
         return SpecDoc(meta={}, sections={}, raw=text)
-    meta = tomllib.loads(m.group(1))
+    try:
+        meta = tomllib.loads(m.group(1))
+    except tomllib.TOMLDecodeError:
+        return SpecDoc(meta={}, sections={}, raw=text)  # unparseable → empty meta (won't be selected)
     sections: dict[str, str] = {}
     cur, buf = None, []
     for line in m.group(2).splitlines():

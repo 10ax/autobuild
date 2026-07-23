@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import os
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
@@ -15,7 +16,16 @@ def read_ledger(path: Path) -> list[dict]:
     path = Path(path)
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    rows = []
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue  # tolerate a torn final line from a crash mid-append
+    return rows
 
 
 @dataclass
@@ -31,10 +41,15 @@ def load_governor_state(path: Path) -> GovernorState:
     path = Path(path)
     if not path.exists():
         return GovernorState()
-    return GovernorState(**json.loads(path.read_text()))
+    try:
+        return GovernorState(**json.loads(path.read_text()))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return GovernorState()  # corrupt/incompatible → fresh state (overwritten on next save)
 
 
 def save_governor_state(path: Path, state: GovernorState) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(asdict(state), indent=2))
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(asdict(state), indent=2))
+    os.replace(tmp, path)  # atomic

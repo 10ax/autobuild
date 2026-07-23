@@ -15,6 +15,7 @@ from autobuild.governor import (Pace, compute_pace, record_spend, update_ceiling
 from autobuild.backlog import scan_backlog, select_pending, set_status, add_lock, clear_lock, read_lock
 from autobuild.build import run_build, verify_repo, BuildResult
 from autobuild.notify import notify
+from autobuild.spec import validate_spec
 
 
 def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
@@ -35,6 +36,20 @@ def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
         items = [i for i in all_items if i.meta.get("slug") in inflight]
     else:
         items = select_pending(all_items, pace.concurrency)
+        validated = []
+        for it in items:
+            errs = validate_spec(it.doc, level="brief")
+            if errs:
+                ident = it.meta.get("slug") or it.path.stem
+                set_status(it, "needs-review")
+                append_ledger(ledger_path, {"slug": ident, "status": "needs-review",
+                                            "reason": "invalid brief: " + "; ".join(errs),
+                                            "at": now.isoformat()})
+                notify(cfg, "needs-review", slug=ident, repo="",
+                       reason="invalid brief: " + "; ".join(errs[:3]), runner=runner)
+                continue
+            validated.append(it)
+        items = validated
     if not items:
         return {"action": "idle", "pace": pace}
 

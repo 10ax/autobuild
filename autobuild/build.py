@@ -81,9 +81,12 @@ def run_build(brief_path: Path, repo_root: Path, model: str, pace: Pace,
     return result
 
 
-def verify_repo(repo_root: Path, runner=subprocess.run) -> bool:
+def verify_repo(repo_root: Path, runner=subprocess.run, timeout: int = 600) -> bool:
     for cmd in (["npm", "test", "--silent"], ["npx", "tsc", "--noEmit"]):
-        cp = runner(cmd, cwd=str(repo_root), capture_output=True, text=True)
+        try:
+            cp = runner(cmd, cwd=str(repo_root), capture_output=True, text=True, timeout=timeout)
+        except (OSError, subprocess.TimeoutExpired):
+            return False  # missing tool or hung test → treat as failed verify
         if cp.returncode != 0:
             return False
     return True

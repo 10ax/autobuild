@@ -1,4 +1,5 @@
-import tempfile, unittest
+import tempfile, threading, unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from autobuild.backlog import (scan_backlog, select_pending, set_status,
                                add_lock, read_lock, clear_lock)
@@ -48,3 +49,24 @@ class TestBacklog(unittest.TestCase):
         self.assertEqual({e["slug"] for e in read_lock(p)}, {"alpha", "beta"})
         clear_lock(p, "alpha")
         self.assertEqual([e["slug"] for e in read_lock(p)], ["beta"])
+
+    def test_add_lock_is_concurrency_safe(self):
+        p = Path(tempfile.mkdtemp()) / "current.lock"
+        start = threading.Barrier(8)
+        def worker(i):
+            start.wait()  # maximize contention
+            add_lock(p, {"slug": f"s{i}", "repo": f"/r/s{i}"})
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            list(ex.map(worker, range(8)))
+        slugs = {e["slug"] for e in read_lock(p)}
+        self.assertEqual(slugs, {f"s{i}" for i in range(8)})  # no lost entries
+
+    def test_scan_backlog_tolerates_malformed_toml(self):
+        import tempfile as _tf
+        d = Path(_tf.mkdtemp()) / "backlog"
+        d.mkdir()
+        (d / "bad.md").write_text("+++\nthis = = broken toml\n+++\n## Intent\nx\n")
+        (d / "good.md").write_text(BRIEF.format(slug="ok", prio=1, status="pending"))
+        items = scan_backlog(d)                          # must NOT raise
+        slugs = [i.meta.get("slug") for i in items]
+        self.assertIn("ok", slugs)                        # good file still scanned
