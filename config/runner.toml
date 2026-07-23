@@ -1,0 +1,20 @@
+[hours]
+timezone   = "Europe/Rome"
+quiet_from = "08:00"
+quiet_to   = "19:00"
+
+[pace]
+max_concurrency = 3
+per_project_timeout_min = 30
+opus_escalation = true
+weekly_reserve_enabled = false
+weekly_reserve_frac = 0.12
+weekly_target_usd = 0.0
+
+[build]
+stack = "typescript"
+default_model = "sonnet"
+
+[notify]
+telegram_script = "~/.claude/notify-telegram.sh"
+notify_on = ["done", "needs-review", "paused", "crash"]

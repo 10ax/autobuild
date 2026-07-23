@@ -1,0 +1,15 @@
+# deploy/autobuild.service  ->  ~/.config/systemd/user/autobuild.service
+[Unit]
+Description=Autobuild runner (autonomous overnight builder)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/autobuild
+Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 -m autobuild --poll 300
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target
