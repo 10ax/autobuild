@@ -41,3 +41,18 @@ class TestBuild(unittest.TestCase):
     def test_verify_repo_gates_on_exit_codes(self):
         self.assertTrue(verify_repo(Path("/r/x"), runner=lambda *a, **k: _CP(returncode=0)))
         self.assertFalse(verify_repo(Path("/r/x"), runner=lambda *a, **k: _CP(returncode=1)))
+
+    def test_run_build_nonzero_exit_is_error(self):
+        out = json.dumps({"total_cost_usd": 0.1})  # valid JSON, no is_error field
+        r = run_build(Path("/b/x.md"), Path("/r/x"), "sonnet",
+                      Pace("low", 1, False, "sonnet"), Config(root="/tmp"),
+                      runner=lambda *a, **k: _CP(stdout=out, returncode=1))
+        self.assertTrue(r.is_error)
+        self.assertEqual(r.raw.get("returncode"), 1)
+
+    def test_run_build_handles_missing_binary(self):
+        def boom(*a, **k):
+            raise FileNotFoundError("claude not found")
+        r = run_build(Path("/b/x.md"), Path("/r/x"), "sonnet",
+                      Pace("low", 1, False, "sonnet"), Config(root="/tmp"), runner=boom)
+        self.assertTrue(r.is_error)

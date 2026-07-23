@@ -71,7 +71,14 @@ def run_build(brief_path: Path, repo_root: Path, model: str, pace: Pace,
                     timeout=cfg.per_project_timeout_min * 60, env=env)
     except subprocess.TimeoutExpired:
         return BuildResult(is_error=True, cost_usd=0.0, raw={"timeout": True})
-    return parse_result(cp.stdout or "")
+    except OSError as e:
+        return BuildResult(is_error=True, cost_usd=0.0, raw={"error": str(e)})
+    result = parse_result(cp.stdout or "")
+    rc = getattr(cp, "returncode", 0)
+    if rc != 0:
+        result.is_error = True
+        result.raw = {**(result.raw or {}), "returncode": rc}
+    return result
 
 
 def verify_repo(repo_root: Path, runner=subprocess.run) -> bool:
