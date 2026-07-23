@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from autobuild.config import Config
 from autobuild.ledger import GovernorState
@@ -46,3 +46,26 @@ class TestGovernor(unittest.TestCase):
         self.assertAlmostEqual(st.window_spend_usd, 1.5)
         self.assertAlmostEqual(st.weekly_spend_usd, 1.5)
         self.assertIsNotNone(st.window_start)
+
+    def test_late_in_window_clamps_to_low(self):
+        st = GovernorState(learned_ceiling_usd=10.0, window_spend_usd=0.1,
+                           window_start=_at(23).timestamp() - 0.9 * WINDOW_SECONDS)
+        p = compute_pace(_at(23), _cfg(max_concurrency=3), st)
+        self.assertEqual(p.level, "low")       # ample headroom would be "high", but late clamps it
+        self.assertEqual(p.concurrency, 1)
+        self.assertFalse(p.subagents)
+
+    def test_record_spend_resets_expired_window(self):
+        old_start = _at(23).timestamp() - (WINDOW_SECONDS + 10)
+        st = GovernorState(window_start=old_start, window_spend_usd=5.0,
+                           week_start=_at(23).date().isoformat())
+        st = record_spend(st, 1.0, _at(23))
+        self.assertAlmostEqual(st.window_spend_usd, 1.0)              # reset to 0 then +1.0
+        self.assertAlmostEqual(st.window_start, _at(23).timestamp())
+
+    def test_record_spend_rolls_week_after_7_days(self):
+        old_week = (_at(23) - timedelta(days=8)).date().isoformat()
+        st = GovernorState(week_start=old_week, weekly_spend_usd=50.0)
+        st = record_spend(st, 2.0, _at(23))
+        self.assertAlmostEqual(st.weekly_spend_usd, 2.0)             # reset to 0 then +2.0
+        self.assertEqual(st.week_start, _at(23).date().isoformat())
