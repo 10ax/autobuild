@@ -17,6 +17,14 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(cfg.max_concurrency, 3)
         self.assertFalse(cfg.weekly_reserve_enabled)
         self.assertEqual(cfg.default_model, "sonnet")
+        self.assertEqual(cfg.weekend_from, "fri 19:00")   # weekend-continuous default
+        self.assertEqual(cfg.weekend_to, "mon 08:00")
+
+    def test_weekend_overrides(self):
+        p, d = _write('[hours]\nweekend_from = "sat 00:00"\nweekend_to = "sun 23:59"\n')
+        cfg = load_config(p, root=d)
+        self.assertEqual(cfg.weekend_from, "sat 00:00")
+        self.assertEqual(cfg.weekend_to, "sun 23:59")
 
     def test_overrides(self):
         p, d = _write('[pace]\nmax_concurrency = 2\n[build]\ndefault_model = "opus"\n')

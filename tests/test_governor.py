@@ -10,8 +10,10 @@ from autobuild.usage import UsageSignal
 TZ = ZoneInfo("Europe/Rome")
 def _cfg(**kw):
     return Config(root=".", **kw)
-def _at(h):  # today at hour h, Rome
+def _at(h):  # a WEEKDAY (Thu 2026-07-23) at hour h, Rome
     return datetime(2026, 7, 23, h, 0, tzinfo=TZ)
+def _dt(d, h, m=0):  # 2026-07-{d} (24=Fri, 25=Sat, 26=Sun, 27=Mon) at h:m, Rome
+    return datetime(2026, 7, d, h, m, tzinfo=TZ)
 
 class TestGovernor(unittest.TestCase):
     def test_daytime_pauses(self):
@@ -21,6 +23,30 @@ class TestGovernor(unittest.TestCase):
     def test_night_uncalibrated_is_conservative(self):
         p = compute_pace(_at(23), _cfg(), GovernorState())
         self.assertEqual((p.concurrency, p.model, p.subagents), (1, "sonnet", False))
+
+    # --- weekend-continuous policy (Fri 19:00 → Mon 08:00) ---
+    def test_weekday_daytime_still_quiet(self):
+        self.assertTrue(in_quiet_hours(_at(12), _cfg()))          # Thu 12:00 → weekday quiet
+
+    def test_friday_evening_starts_weekend(self):
+        self.assertTrue(in_quiet_hours(_dt(24, 18), _cfg()))      # Fri 18:00 → still weekday quiet
+        self.assertFalse(in_quiet_hours(_dt(24, 20), _cfg()))     # Fri 20:00 → weekend, active
+
+    def test_saturday_and_sunday_daytime_active(self):
+        self.assertFalse(in_quiet_hours(_dt(25, 12), _cfg()))     # Sat noon → active
+        self.assertFalse(in_quiet_hours(_dt(26, 3), _cfg()))      # Sun 03:00 → active
+        self.assertFalse(in_quiet_hours(_dt(26, 15), _cfg()))     # Sun 15:00 → active
+
+    def test_monday_morning_ends_weekend(self):
+        self.assertFalse(in_quiet_hours(_dt(27, 7), _cfg()))      # Mon 07:00 → still weekend
+        self.assertTrue(in_quiet_hours(_dt(27, 9), _cfg()))       # Mon 09:00 → weekday quiet resumes
+
+    def test_saturday_daytime_pace_is_not_pause(self):
+        # the whole point: uncalibrated Sat noon should WORK (conservative), not pause
+        self.assertEqual(compute_pace(_dt(25, 12), _cfg(), GovernorState()).level, "low")
+
+    def test_weekend_disabled_falls_back_to_daily(self):
+        self.assertTrue(in_quiet_hours(_dt(25, 12), _cfg(weekend_from="", weekend_to="")))
 
     def test_night_ample_headroom_ramps_and_escalates(self):
         st = GovernorState(learned_ceiling_usd=10.0, window_spend_usd=0.5,

@@ -2,6 +2,10 @@
 timezone   = "Europe/Rome"
 quiet_from = "08:00"
 quiet_to   = "19:00"
+# Weekends run continuously (no daytime quiet): active from Fri 19:00 to Mon 08:00.
+# Format "day HH:MM". Set both to "" to disable and use only quiet_from/quiet_to daily.
+weekend_from = "fri 19:00"
+weekend_to   = "mon 08:00"
 
 [pace]
 max_concurrency = 3

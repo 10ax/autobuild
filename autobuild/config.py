@@ -14,6 +14,9 @@ class Config:
     timezone: str = "Europe/Rome"
     quiet_from: str = "08:00"
     quiet_to: str = "19:00"
+    # Weekends run continuously (no daytime quiet). "day HH:MM"; set both "" to disable.
+    weekend_from: str = "fri 19:00"
+    weekend_to: str = "mon 08:00"
     max_concurrency: int = 3
     per_project_timeout_min: int = 30
     opus_escalation: bool = True
@@ -40,6 +43,8 @@ def load_config(path: Path, root: Path | None = None) -> Config:
         timezone=hours.get("timezone", "Europe/Rome"),
         quiet_from=hours.get("quiet_from", "08:00"),
         quiet_to=hours.get("quiet_to", "19:00"),
+        weekend_from=hours.get("weekend_from", "fri 19:00"),
+        weekend_to=hours.get("weekend_to", "mon 08:00"),
         max_concurrency=int(pace.get("max_concurrency", 3)),
         per_project_timeout_min=int(pace.get("per_project_timeout_min", 30)),
         opus_escalation=bool(pace.get("opus_escalation", True)),
