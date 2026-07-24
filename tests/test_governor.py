@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 from autobuild.config import Config
 from autobuild.ledger import GovernorState
 from autobuild.governor import (in_quiet_hours, compute_pace, record_spend,
-                                update_ceiling_ema, WINDOW_SECONDS)
+                                update_ceiling_ema, anchor_window, WINDOW_SECONDS)
 
 TZ = ZoneInfo("Europe/Rome")
 def _cfg(**kw):
@@ -69,3 +69,23 @@ class TestGovernor(unittest.TestCase):
         st = record_spend(st, 2.0, _at(23))
         self.assertAlmostEqual(st.weekly_spend_usd, 2.0)             # reset to 0 then +2.0
         self.assertEqual(st.week_start, _at(23).date().isoformat())
+
+    def test_anchor_window_sets_start_and_zeroes_spend(self):
+        st = anchor_window(GovernorState(window_spend_usd=5.0, window_start=123.0),
+                           9_999_999_999.0)
+        self.assertEqual(st.window_start, 9_999_999_999.0)
+        self.assertEqual(st.window_spend_usd, 0.0)
+
+    def test_rate_limit_cooldown_pauses_until_reset(self):
+        # window anchored to a FUTURE reset (post-429) → blocked until the window opens,
+        # even though window_spend is 0 (which would otherwise read as full headroom).
+        st = GovernorState(learned_ceiling_usd=10.0, window_spend_usd=0.0,
+                           window_start=_at(23).timestamp() + 3600)
+        self.assertEqual(compute_pace(_at(23), _cfg(max_concurrency=3), st).level, "pause")
+
+    def test_expired_window_recovers_to_fresh(self):
+        # a fully-elapsed window with stale high spend computes as fresh, so the governor
+        # recovers from a rate-limit pause without needing a spend event to reset it.
+        st = GovernorState(learned_ceiling_usd=10.0, window_spend_usd=9.9,
+                           window_start=_at(23).timestamp() - (WINDOW_SECONDS + 10))
+        self.assertEqual(compute_pace(_at(23), _cfg(max_concurrency=3), st).level, "high")

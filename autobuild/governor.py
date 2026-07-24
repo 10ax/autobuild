@@ -76,13 +76,24 @@ def compute_pace(now: datetime, cfg: Config, state: GovernorState) -> Pace:
     wk = weekly_headroom(cfg, state)
     if cfg.weekly_reserve_enabled and cfg.weekly_target_usd > 0 and wk < cfg.weekly_reserve_frac:
         return Pace("pause", 0, False, cfg.default_model)
+    now_ts = now.timestamp()
+    # Rate-limit cooldown: after a 429 the window is anchored to its FUTURE reset
+    # (see anchor_window). Until the clock reaches it we are blocked, so pause — even
+    # though window_spend is 0, which would otherwise read as full headroom.
+    if state.window_start is not None and now_ts < state.window_start:
+        return Pace("pause", 0, False, cfg.default_model)
     # Uncalibrated: run conservatively while we learn the ceiling.
     if state.learned_ceiling_usd <= 0:
         return Pace("low", 1, False, "sonnet")
-    wh = max(0.0, 1.0 - state.window_spend_usd / state.learned_ceiling_usd)
+    # A fully-elapsed window is a fresh window for pacing even if no spend event has
+    # reset it yet — this is what lets the governor recover from a rate-limit pause
+    # (record_spend, the only other reset path, is not called while paused).
+    within_window = (state.window_start is not None
+                     and 0 <= now_ts - state.window_start < WINDOW_SECONDS)
+    effective_spend = state.window_spend_usd if within_window else 0.0
+    wh = max(0.0, 1.0 - effective_spend / state.learned_ceiling_usd)
     # Late-in-window clamp: never start a wide fan-out that will die at the cap.
-    late = (state.window_start is not None
-            and (now.timestamp() - state.window_start) / WINDOW_SECONDS > 0.8)
+    late = within_window and (now_ts - state.window_start) / WINDOW_SECONDS > 0.8
     if wh <= 0.05:
         return Pace("pause", 0, False, cfg.default_model)
     if wh < 0.30 or late:

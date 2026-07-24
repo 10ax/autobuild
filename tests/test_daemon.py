@@ -62,6 +62,22 @@ class TestDaemon(unittest.TestCase):
         item = [i for i in scan_backlog(root / "backlog") if i.meta["slug"] == "alpha"][0]
         self.assertEqual(item.meta["status"], "needs-review")
 
+    def test_rate_limited_anchors_window_and_requeues(self):
+        root = _root()
+        reset = datetime(2026, 7, 23, 23, tzinfo=TZ).timestamp() + 3600
+        st = GovernorState()
+        run_once(
+            Config(root=root, max_concurrency=1),
+            datetime(2026, 7, 23, 23, tzinfo=TZ), st, root / "state",
+            builder=lambda *a, **k: BuildResult(is_error=True, cost_usd=0.7,
+                                                rate_limited=True, reset_at=reset),
+            verifier=lambda *a, **k: True,
+        )
+        item = [i for i in scan_backlog(root / "backlog") if i.meta["slug"] == "alpha"][0]
+        self.assertEqual(item.meta["status"], "pending")     # requeued, not consumed
+        self.assertEqual(st.window_start, reset)             # window anchored to the reset
+        self.assertGreater(st.learned_ceiling_usd, 0.0)      # ceiling calibrated from the hit
+
     def test_invalid_brief_diverted_to_needs_review_not_built(self):
         root = _root()
         # overwrite the example with an invalid brief: pending but NO slug

@@ -66,3 +66,47 @@ class TestBuild(unittest.TestCase):
         def hang(*a, **k):
             raise subprocess.TimeoutExpired(cmd="npm", timeout=1)
         self.assertFalse(verify_repo(Path("/r/x"), runner=hang))
+
+    # --- api_error_status: the structured limit signal from headless `claude -p` ---
+    def test_parse_detects_rate_limit_via_api_error_status_dict(self):
+        out = json.dumps({"is_error": True,
+                          "api_error_status": {"status": 429, "message": "Too Many Requests"}})
+        r = parse_result(out)
+        self.assertTrue(r.rate_limited)
+        self.assertEqual(r.api_error_status, {"status": 429, "message": "Too Many Requests"})
+
+    def test_parse_detects_rate_limit_via_api_error_status_string(self):
+        out = json.dumps({"is_error": True, "api_error_status": "429 rate_limit_error"})
+        self.assertTrue(parse_result(out).rate_limited)
+
+    def test_parse_reset_from_api_error_status(self):
+        out = json.dumps({"is_error": True,
+                          "api_error_status": {"code": 429, "resets_at": 1753305600}})
+        r = parse_result(out)
+        self.assertTrue(r.rate_limited)
+        self.assertEqual(r.reset_at, 1753305600.0)
+
+    def test_parse_success_with_limit_wording_not_flagged(self):
+        # a SUCCESSFUL build whose own content mentions "rate limit" must NOT be flagged
+        out = json.dumps({"is_error": False, "total_cost_usd": 0.2,
+                          "result": "Implemented a token rate limit helper library.",
+                          "api_error_status": None})
+        self.assertFalse(parse_result(out).rate_limited)
+
+    def test_parse_captures_api_error_status_none_on_success(self):
+        out = json.dumps({"is_error": False, "api_error_status": None})
+        self.assertIsNone(parse_result(out).api_error_status)
+
+    def test_parse_error_without_api_status_falls_back_to_markers(self):
+        # api_error_status absent but an error message carries a marker → still detected
+        out = json.dumps({"is_error": True, "result": "Usage limit reached. reset_at:1753305600"})
+        r = parse_result(out)
+        self.assertTrue(r.rate_limited)
+        self.assertEqual(r.reset_at, 1753305600.0)
+
+    def test_parse_benign_id_containing_429_not_flagged(self):
+        # an errored run whose api_error_status is a NON-limit error with an id that merely
+        # contains "429" must NOT be read as rate-limited (would cost a needless long pause)
+        out = json.dumps({"is_error": True,
+                          "api_error_status": {"request_id": "req_4290xZ", "type": "overloaded_error"}})
+        self.assertFalse(parse_result(out).rate_limited)

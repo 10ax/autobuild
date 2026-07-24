@@ -11,7 +11,7 @@ from autobuild.config import Config, load_config
 from autobuild.ledger import (GovernorState, load_governor_state, save_governor_state,
                               append_ledger)
 from autobuild.governor import (Pace, compute_pace, record_spend, update_ceiling_ema,
-                                next_active_time)
+                                anchor_window, next_active_time)
 from autobuild.backlog import scan_backlog, select_pending, set_status, add_lock, clear_lock, read_lock
 from autobuild.build import run_build, verify_repo, BuildResult
 from autobuild.notify import notify
@@ -70,9 +70,17 @@ def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
     for it, repo, res in results:
         slug = it.meta["slug"]
         if res.rate_limited:
+            # Calibrate the ceiling from the spend at the 429 BEFORE anchoring resets it.
             update_ceiling_ema(state, state.window_spend_usd or res.cost_usd)
+            # If the result carried a structured reset time (api_error_status/message),
+            # anchor the window to it so the governor pauses exactly until it reopens.
+            if res.reset_at:
+                anchor_window(state, res.reset_at)
             set_status(it, "pending")
-            notify(cfg, "paused", reason=f"rate limited on {slug}", runner=runner)
+            notify(cfg, "paused",
+                   reason=f"rate limited on {slug}"
+                          + (f", resets at {int(res.reset_at)}" if res.reset_at else ""),
+                   runner=runner)
         else:
             record_spend(state, res.cost_usd, now)
             green = (not res.is_error) and verifier(repo, runner=runner)
