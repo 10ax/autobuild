@@ -170,6 +170,48 @@ class TestGovernor(unittest.TestCase):
                          signal=UsageSignal(used_pct_5h=5.0, used_pct_7d=90.0))
         self.assertNotEqual(p.level, "pause")  # guard off → weekly ignored
 
+    # --- use-it-or-lose-it burst: within 24h of the 7d reset, spend the expiring headroom ---
+    def test_burst_over_ceiling_spends_remaining(self):
+        now = _dt(24, 20)                       # Fri 20:00, weekend active
+        reset = _dt(25, 10).timestamp()         # Sat 10:00 → ~14h away, inside 24h burst window
+        st = GovernorState(day_start="2026-07-24", day_start_pct=71.0)
+        p = compute_pace(now, _cfg(weekly_guard_enabled=True, max_concurrency=3), st,
+                         signal=UsageSignal(status="allowed", used_pct_5h=21.0,
+                                            used_pct_7d=71.0, reset_at_7d=reset))
+        self.assertEqual(p.level, "high")       # reset imminent → use it, don't waste it
+
+    def test_burst_ignores_daily_cap(self):
+        now = _dt(25, 2)                        # Sat 02:00, weekend active
+        reset = _dt(25, 10).timestamp()         # ~8h away
+        st = GovernorState(day_start="2026-07-25", day_start_pct=5.0)   # +40 today, cap is 10
+        p = compute_pace(now, _cfg(weekly_guard_enabled=True, max_concurrency=3), st,
+                         signal=UsageSignal(status="allowed", used_pct_5h=10.0,
+                                            used_pct_7d=45.0, reset_at_7d=reset))
+        self.assertEqual(p.level, "high")       # daily cap suspended in the burst window
+
+    def test_no_burst_far_from_reset_keeps_ceiling(self):
+        now = _dt(25, 12)
+        reset = _dt(26, 20).timestamp()         # ~32h away → outside the 24h window
+        st = GovernorState(day_start="2026-07-25", day_start_pct=45.0)
+        p = compute_pace(now, _cfg(weekly_guard_enabled=True), st,
+                         signal=UsageSignal(status="allowed", used_pct_5h=5.0,
+                                            used_pct_7d=51.0, reset_at_7d=reset))
+        self.assertEqual(p.level, "pause")      # reset far off → ceiling still protects the reserve
+
+    def test_burst_still_pauses_on_5h_rejected(self):
+        now, reset = _dt(24, 22), _dt(25, 10).timestamp()
+        p = compute_pace(now, _cfg(weekly_guard_enabled=True), GovernorState(),
+                         signal=UsageSignal(status="rejected", used_pct_7d=71.0, reset_at_7d=reset))
+        self.assertEqual(p.level, "pause")      # 5h hard stop wins even inside the burst window
+
+    def test_no_burst_without_reset_time_keeps_ceiling(self):
+        now = _dt(24, 22)
+        st = GovernorState(day_start="2026-07-24", day_start_pct=71.0)
+        p = compute_pace(now, _cfg(weekly_guard_enabled=True), st,
+                         signal=UsageSignal(status="allowed", used_pct_5h=21.0,
+                                            used_pct_7d=71.0, reset_at_7d=None))
+        self.assertEqual(p.level, "pause")      # unknown reset → cannot burst → ceiling applies
+
     def test_roll_day_baselines_and_resets(self):
         st = GovernorState()
         roll_day(st, _dt(25, 10), UsageSignal(used_pct_7d=40.0))

@@ -32,11 +32,14 @@ class TestConfig(unittest.TestCase):
         self.assertTrue(cfg.weekly_guard_enabled)
         self.assertEqual(cfg.weekly_ceiling_pct, 50.0)
         self.assertEqual(cfg.daily_cap_pct, 10.0)
-        p, d = _write('[pace]\nweekly_ceiling_pct = 40\ndaily_cap_pct = 8\nweekly_guard_enabled = false\n')
+        self.assertEqual(cfg.burst_before_reset_h, 24.0)
+        p, d = _write('[pace]\nweekly_ceiling_pct = 40\ndaily_cap_pct = 8\n'
+                      'weekly_guard_enabled = false\nburst_before_reset_h = 12\n')
         cfg = load_config(p, root=d)
         self.assertFalse(cfg.weekly_guard_enabled)
         self.assertEqual(cfg.weekly_ceiling_pct, 40.0)
         self.assertEqual(cfg.daily_cap_pct, 8.0)
+        self.assertEqual(cfg.burst_before_reset_h, 12.0)
 
     def test_overrides(self):
         p, d = _write('[pace]\nmax_concurrency = 2\n[build]\ndefault_model = "opus"\n')

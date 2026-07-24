@@ -19,6 +19,9 @@ weekly_target_usd = 0.0
 weekly_guard_enabled = true
 weekly_ceiling_pct = 50.0   # pause when weekly usage reaches this % (reserve the rest for you)
 daily_cap_pct = 10.0        # add at most this many weekly-% points per calendar day
+# Use-it-or-lose-it: within this many hours of the weekly reset the reserve would just expire,
+# so spend it — ceiling + daily cap suspended (quiet hours and the 5h limit still apply). 0 = off.
+burst_before_reset_h = 24.0
 
 [build]
 stack = "typescript"

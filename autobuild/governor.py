@@ -135,10 +135,19 @@ def compute_pace(now: datetime, cfg: Config, state: GovernorState,
         wk7 = signal.used_pct_7d
         if wk7 is None:
             return Pace("pause", 0, False, cfg.default_model)
-        if wk7 >= cfg.weekly_ceiling_pct:                       # reserve the rest for the user
-            return Pace("pause", 0, False, cfg.default_model)
-        if state.day_start_pct is not None and wk7 - state.day_start_pct >= cfg.daily_cap_pct:
-            return Pace("pause", 0, False, cfg.default_model)   # per-day draw cap reached
+        # Use-it-or-lose-it: within burst_before_reset_h of the weekly reset the reserved
+        # headroom would just expire at the reset, so spend it — suspend the ceiling and the
+        # daily cap. Quiet hours (above) and the live 5h limit (above/below) still gate, so this
+        # only bursts inside an active window and never past the API's real rate limit. Needs a
+        # known reset time; without it we cannot tell we're near a reset, so the caps stand.
+        reset7 = signal.reset_at_7d
+        bursting = (cfg.burst_before_reset_h > 0 and reset7 is not None
+                    and reset7 - now_ts <= cfg.burst_before_reset_h * 3600)
+        if not bursting:
+            if wk7 >= cfg.weekly_ceiling_pct:                   # reserve the rest for the user
+                return Pace("pause", 0, False, cfg.default_model)
+            if state.day_start_pct is not None and wk7 - state.day_start_pct >= cfg.daily_cap_pct:
+                return Pace("pause", 0, False, cfg.default_model)   # per-day draw cap reached
     # Rate-limit cooldown: after a 429 the window is anchored to its FUTURE reset
     # (see anchor_window). Until the clock reaches it we are blocked, so pause — even
     # though window_spend is 0, which would otherwise read as full headroom.

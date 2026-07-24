@@ -28,6 +28,10 @@ class Config:
     weekly_guard_enabled: bool = True
     weekly_ceiling_pct: float = 50.0
     daily_cap_pct: float = 10.0
+    # Use-it-or-lose-it: within this many hours of the weekly (7d) reset, the reserved headroom
+    # would just expire, so the guard spends it — ceiling + daily cap suspended (quiet hours and
+    # the live 5h limit still apply). 0 disables the burst.
+    burst_before_reset_h: float = 24.0
     stack: str = "typescript"
     default_model: str = "sonnet"
     telegram_script: str = "~/.claude/notify-telegram.sh"
@@ -59,6 +63,7 @@ def load_config(path: Path, root: Path | None = None) -> Config:
         weekly_guard_enabled=bool(pace.get("weekly_guard_enabled", True)),
         weekly_ceiling_pct=float(pace.get("weekly_ceiling_pct", 50.0)),
         daily_cap_pct=float(pace.get("daily_cap_pct", 10.0)),
+        burst_before_reset_h=float(pace.get("burst_before_reset_h", 24.0)),
         stack=build.get("stack", "typescript"),
         default_model=build.get("default_model", "sonnet"),
         telegram_script=notify.get("telegram_script", "~/.claude/notify-telegram.sh"),
