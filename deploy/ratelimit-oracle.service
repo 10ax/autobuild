@@ -5,7 +5,9 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=%h
+# Run from the usage-feed dir so the oracle's `claude -p` Stop/Notification hook is tagged with
+# that cwd and notify-telegram.sh skips it (no "ok" pings on Telegram). Dir is pre-trusted.
+WorkingDirectory=%h/.claude/usage-feed
 # Same PATH as autobuild.service so `claude`, node, etc. resolve (update the nvm pin if it changes).
 Environment=PATH=%h/.local/bin:%h/.cargo/bin:%h/.nvm/versions/node/v22.16.0/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/usr/bin/env bash %h/autobuild/deploy/ratelimit-oracle.sh
