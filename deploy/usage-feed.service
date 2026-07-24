@@ -1,0 +1,18 @@
+# deploy/usage-feed.service  ->  ~/.config/systemd/user/usage-feed.service
+# Keeps ~/.claude/usage-snapshot.json fresh (5h + 7d %) via one always-on interactive Haiku
+# `claude` session in tmux, so the autobuild governor's weekly-usage guard has a live 7d %
+# around the clock. Requires the ~/.claude/usage-feed dir to be pre-trusted in ~/.claude.json.
+[Unit]
+Description=Autobuild usage feed (tmux Claude session refreshing the weekly-% snapshot)
+After=network-online.target
+
+[Service]
+Type=simple
+Environment=PATH=%h/.local/bin:%h/.cargo/bin:%h/.nvm/versions/node/v22.16.0/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env bash %h/.claude/usage-feed.sh
+ExecStopPost=-/usr/bin/tmux kill-session -t usage-feed
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target
