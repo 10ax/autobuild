@@ -6,3 +6,8 @@ projects/*
 !projects/.gitkeep
 state/*
 !state/.gitkeep
+# business content — kept local (daemon needs backlog/) but stripped from the public repo + history
+docs/hustle/
+staging-backlog/
+backlog/*.md
+docs/superpowers/specs/
