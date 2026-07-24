@@ -7,7 +7,7 @@ from autobuild.config import Config
 from autobuild.ledger import GovernorState, read_ledger
 from autobuild.build import BuildResult
 from autobuild.backlog import scan_backlog
-from autobuild.daemon import run_once
+from autobuild.daemon import run_once as _run_once
 
 TZ = ZoneInfo("Europe/Rome")
 NIGHT = datetime(2026, 7, 23, 23, tzinfo=TZ)
@@ -41,16 +41,25 @@ def _C(root, **kw):  # Config with the weekly guard OFF (build/pace-flow tests a
     return Config(root=root, **{"weekly_guard_enabled": False, **kw})
 
 
+def _run(*a, **kw):
+    """run_once with the notifier captured — tests must NEVER shell out to the real telegram
+    script. Pass notes=[] to inspect the (event, kwargs) tuples the daemon emitted."""
+    notes = kw.pop("notes", None)
+    sink = notes if notes is not None else []
+    kw["notifier"] = lambda cfg, event, runner=None, **k: sink.append((event, k))
+    return _run_once(*a, **kw)
+
+
 class TestDaemon(unittest.TestCase):
     def test_daytime_returns_pause_and_builds_nothing(self):
         root = _root()
-        res = run_once(_C(root), datetime(2026, 7, 23, 12, tzinfo=TZ),
+        res = _run(_C(root), datetime(2026, 7, 23, 12, tzinfo=TZ),
                        GovernorState(), root / "state", **_sig(root))
         self.assertEqual(res["action"], "pause")
 
     def test_night_builds_and_marks_done_on_green(self):
         root = _root()
-        res = run_once(
+        res = _run(
             _C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
             builder=lambda *a, **k: BuildResult(is_error=False, cost_usd=0.5),
             verifier=lambda *a, **k: True, **_sig(root),
@@ -62,7 +71,7 @@ class TestDaemon(unittest.TestCase):
 
     def test_red_verify_marks_needs_review(self):
         root = _root()
-        run_once(
+        _run(
             _C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
             builder=lambda *a, **k: BuildResult(is_error=False, cost_usd=0.5),
             verifier=lambda *a, **k: False, **_sig(root),
@@ -74,7 +83,7 @@ class TestDaemon(unittest.TestCase):
         root = _root()
         reset = NIGHT.timestamp() + 3600
         st = GovernorState()
-        run_once(
+        _run(
             _C(root, max_concurrency=1), NIGHT, st, root / "state",
             builder=lambda *a, **k: BuildResult(is_error=True, cost_usd=0.7,
                                                 rate_limited=True, reset_at=reset),
@@ -92,7 +101,7 @@ class TestDaemon(unittest.TestCase):
         sig["oracle_path"].write_text(json.dumps(
             {"status": "rejected", "reset_at": NIGHT.timestamp() + 1800,
              "rate_limit_type": "five_hour", "written_at": NIGHT.timestamp() - 60}))
-        res = run_once(
+        res = _run(
             _C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
             builder=lambda *a, **k: built.append(1) or BuildResult(is_error=False, cost_usd=0.1),
             verifier=lambda *a, **k: True, **sig,
@@ -105,7 +114,7 @@ class TestDaemon(unittest.TestCase):
         reset = NIGHT.timestamp() + 2400
         st = GovernorState()
         sig = _sig(root)
-        run_once(
+        _run(
             _C(root, max_concurrency=1), NIGHT, st, root / "state",
             builder=lambda *a, **k: BuildResult(is_error=True, cost_usd=0.6, rate_limited=True,
                                                 rate_status="rejected", rate_reset_at=reset,
@@ -121,7 +130,7 @@ class TestDaemon(unittest.TestCase):
         root = _root()
         reset = NIGHT.timestamp() + 3000
         sig = _sig(root)
-        run_once(
+        _run(
             _C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
             builder=lambda *a, **k: BuildResult(is_error=False, cost_usd=0.4,
                                                 rate_status="allowed", rate_reset_at=reset),
@@ -137,7 +146,7 @@ class TestDaemon(unittest.TestCase):
             '+++\nspec_version = "1.0"\ntitle = "x"\ntier = "script"\n'
             'priority = 5\nstatus = "pending"\n+++\n## Intent\nx\n## Acceptance Criteria\nA1. x\n')
         built = []
-        run_once(
+        _run(
             _C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
             builder=lambda *a, **k: built.append(1) or BuildResult(is_error=False, cost_usd=0.0),
             verifier=lambda *a, **k: True, **_sig(root),
@@ -146,6 +155,32 @@ class TestDaemon(unittest.TestCase):
         item = [i for i in scan_backlog(root / "backlog")][0]
         self.assertEqual(item.meta["status"], "needs-review")
 
+    # --- notifications (must never shell out in tests; content must be human-readable) ---
+    def test_done_emits_single_done_notification(self):
+        root = _root(); notes = []
+        _run(
+            _C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
+            builder=lambda *a, **k: BuildResult(is_error=False, cost_usd=0.5),
+            verifier=lambda *a, **k: True, notes=notes, **_sig(root),
+        )
+        self.assertEqual([e for e, _ in notes], ["done"])              # exactly one, right event
+        self.assertEqual(notes[0][1]["slug"], "alpha")
+        self.assertEqual(notes[0][1]["tests"], "green")
+
+    def test_paused_notification_reset_is_human_readable(self):
+        root = _root(); notes = []
+        reset = NIGHT.timestamp() + 3600
+        _run(
+            _C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
+            builder=lambda *a, **k: BuildResult(is_error=True, cost_usd=0.7,
+                                                rate_limited=True, reset_at=reset),
+            verifier=lambda *a, **k: True, notes=notes, **_sig(root),
+        )
+        reason = dict(notes)["paused"]["reason"]
+        self.assertIn("rate limited on alpha", reason)
+        self.assertIn(":", reason)                       # a clock time, not a bare epoch
+        self.assertNotIn(str(int(reset)), reason)        # the raw epoch must not leak through
+
     # --- weekly guard on (production default) ---
     def test_weekly_guard_pauses_over_ceiling(self):
         root = _root(); sig = _sig(root)
@@ -153,7 +188,7 @@ class TestDaemon(unittest.TestCase):
             {"five_hour": {"used_percentage": 5.0}, "seven_day": {"used_percentage": 60.0},
              "written_at": NIGHT.timestamp() - 30}))
         built = []
-        res = run_once(
+        res = _run(
             Config(root=root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
             builder=lambda *a, **k: built.append(1) or BuildResult(is_error=False, cost_usd=0.1),
             verifier=lambda *a, **k: True, **sig,
@@ -163,7 +198,7 @@ class TestDaemon(unittest.TestCase):
 
     def test_weekly_guard_fail_closed_without_7d(self):
         root = _root(); built = []
-        res = run_once(
+        res = _run(
             Config(root=root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
             builder=lambda *a, **k: built.append(1) or BuildResult(is_error=False, cost_usd=0.1),
             verifier=lambda *a, **k: True, **_sig(root),   # no signal files → no live 7d
@@ -176,7 +211,7 @@ class TestDaemon(unittest.TestCase):
         sig["snapshot_path"].write_text(json.dumps(
             {"five_hour": {"used_percentage": 5.0}, "seven_day": {"used_percentage": 20.0},
              "written_at": NIGHT.timestamp() - 30}))
-        res = run_once(
+        res = _run(
             Config(root=root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
             builder=lambda *a, **k: BuildResult(is_error=False, cost_usd=0.1),
             verifier=lambda *a, **k: True, **sig,

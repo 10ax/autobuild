@@ -25,7 +25,7 @@ _CLAUDE_DIR = Path.home() / ".claude"
 
 def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
              runner=subprocess.run, verifier=verify_repo, builder=run_build,
-             oracle_path=None, snapshot_path=None) -> dict:
+             oracle_path=None, snapshot_path=None, notifier=notify) -> dict:
     state_dir = Path(state_dir)
     lock_path = state_dir / "current.lock"
     ledger_path = state_dir / "ledger.jsonl"
@@ -55,8 +55,8 @@ def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
                 append_ledger(ledger_path, {"slug": ident, "status": "needs-review",
                                             "reason": "invalid brief: " + "; ".join(errs),
                                             "at": now.isoformat()})
-                notify(cfg, "needs-review", slug=ident, repo="",
-                       reason="invalid brief: " + "; ".join(errs[:3]), runner=runner)
+                notifier(cfg, "needs-review", slug=ident, repo="",
+                         reason="invalid brief: " + "; ".join(errs[:3]), runner=runner)
                 continue
             validated.append(it)
         items = validated
@@ -89,10 +89,9 @@ def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
             # Persist the live status so the very next tick's signal reflects it immediately.
             write_oracle(oracle_path, res.rate_status or "rejected", reset, "five_hour", now)
             set_status(it, "pending")
-            notify(cfg, "paused",
-                   reason=f"rate limited on {slug}"
-                          + (f", resets at {int(reset)}" if reset else ""),
-                   runner=runner)
+            reset_str = (", resets " + datetime.fromtimestamp(reset, now.tzinfo).strftime("%a %H:%M")
+                         if reset else "")
+            notifier(cfg, "paused", reason=f"rate limited on {slug}{reset_str}", runner=runner)
         else:
             record_spend(state, res.cost_usd, now)
             # Per-build capture: keep the shared oracle warm from a benign (allowed) event.
@@ -103,8 +102,8 @@ def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
             set_status(it, status)
             append_ledger(ledger_path, {"slug": slug, "status": status,
                                         "cost_usd": res.cost_usd, "at": now.isoformat()})
-            notify(cfg, "done" if green else "needs-review", slug=slug, repo=str(repo),
-                   tests="green" if green else "red", cost=res.cost_usd, runner=runner)
+            notifier(cfg, "done" if green else "needs-review", slug=slug, repo=str(repo),
+                     tests="green" if green else "red", cost=res.cost_usd, runner=runner)
         clear_lock(lock_path, slug)
 
     save_governor_state(gov_path, state)
