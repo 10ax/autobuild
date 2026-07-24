@@ -41,6 +41,24 @@ class TestBuild(unittest.TestCase):
                       runner=lambda *a, **k: _CP(stdout=out))
         self.assertAlmostEqual(r.cost_usd, 1.0)
 
+    def test_run_build_records_duration(self):
+        out = json.dumps({"is_error": False, "total_cost_usd": 1.0})
+        clock = iter([100.0, 107.5]).__next__          # start, end → 7.5s elapsed
+        r = run_build(Path("/b/x.md"), Path("/r/x"), "sonnet",
+                      Pace("high", 3, True, "sonnet"), Config(root="/tmp"),
+                      runner=lambda *a, **k: _CP(stdout=out), clock=clock)
+        self.assertAlmostEqual(r.duration_s, 7.5)
+
+    def test_run_build_records_duration_on_timeout(self):
+        def boom(*a, **k):
+            raise subprocess.TimeoutExpired(cmd="claude", timeout=1)
+        clock = iter([100.0, 130.0]).__next__          # timed out after 30s of wall time
+        r = run_build(Path("/b/x.md"), Path("/r/x"), "sonnet",
+                      Pace("low", 1, False, "sonnet"), Config(root="/tmp"),
+                      runner=boom, clock=clock)
+        self.assertTrue(r.is_error)
+        self.assertAlmostEqual(r.duration_s, 30.0)
+
     def test_verify_repo_gates_on_exit_codes(self):
         self.assertTrue(verify_repo(Path("/r/x"), runner=lambda *a, **k: _CP(returncode=0)))
         self.assertFalse(verify_repo(Path("/r/x"), runner=lambda *a, **k: _CP(returncode=1)))

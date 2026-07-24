@@ -103,7 +103,8 @@ def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
             append_ledger(ledger_path, {"slug": slug, "status": status,
                                         "cost_usd": res.cost_usd, "at": now.isoformat()})
             notifier(cfg, "done" if green else "needs-review", slug=slug, repo=str(repo),
-                     tests="green" if green else "red", cost=res.cost_usd, runner=runner)
+                     tests="green" if green else "red", cost=res.cost_usd,
+                     secs=res.duration_s, runner=runner)
         clear_lock(lock_path, slug)
 
     save_governor_state(gov_path, state)

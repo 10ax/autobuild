@@ -3,6 +3,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from autobuild.config import Config
@@ -31,6 +32,7 @@ class BuildResult:
     api_error_status: object = None
     rate_status: str | None = None       # allowed | rejected — from stream rate_limit_event
     rate_reset_at: float | None = None    # 5h-window reset epoch from rate_limit_event
+    duration_s: float = 0.0               # wall-clock the build ran (for the notification)
     raw: dict = field(default_factory=dict)
 
 
@@ -174,17 +176,21 @@ def parse_result(stdout: str) -> BuildResult:
 
 
 def run_build(brief_path: Path, repo_root: Path, model: str, pace: Pace,
-              cfg: Config, runner=subprocess.run) -> BuildResult:
+              cfg: Config, runner=subprocess.run, clock=time.monotonic) -> BuildResult:
     argv = build_argv(brief_path, repo_root, model, cfg)
     env = dict(os.environ, PACE=("high" if pace.subagents else "low"))
+    start = clock()
     try:
         cp = runner(argv, capture_output=True, text=True,
                     timeout=cfg.per_project_timeout_min * 60, env=env)
     except subprocess.TimeoutExpired:
-        return BuildResult(is_error=True, cost_usd=0.0, raw={"timeout": True})
+        return BuildResult(is_error=True, cost_usd=0.0,
+                           duration_s=clock() - start, raw={"timeout": True})
     except OSError as e:
-        return BuildResult(is_error=True, cost_usd=0.0, raw={"error": str(e)})
+        return BuildResult(is_error=True, cost_usd=0.0,
+                           duration_s=clock() - start, raw={"error": str(e)})
     result = parse_result(cp.stdout or "")
+    result.duration_s = clock() - start
     rc = getattr(cp, "returncode", 0)
     if rc != 0:
         result.is_error = True

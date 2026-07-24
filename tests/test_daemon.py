@@ -160,12 +160,13 @@ class TestDaemon(unittest.TestCase):
         root = _root(); notes = []
         _run(
             _C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
-            builder=lambda *a, **k: BuildResult(is_error=False, cost_usd=0.5),
+            builder=lambda *a, **k: BuildResult(is_error=False, cost_usd=0.5, duration_s=123.0),
             verifier=lambda *a, **k: True, notes=notes, **_sig(root),
         )
         self.assertEqual([e for e, _ in notes], ["done"])              # exactly one, right event
         self.assertEqual(notes[0][1]["slug"], "alpha")
         self.assertEqual(notes[0][1]["tests"], "green")
+        self.assertEqual(notes[0][1]["secs"], 123.0)                   # real build duration flows through
 
     def test_paused_notification_reset_is_human_readable(self):
         root = _root(); notes = []
