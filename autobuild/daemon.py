@@ -16,16 +16,25 @@ from autobuild.backlog import scan_backlog, select_pending, set_status, add_lock
 from autobuild.build import run_build, verify_repo, BuildResult
 from autobuild.notify import notify
 from autobuild.spec import validate_spec
+from autobuild.usage import read_signal, write_oracle
+
+# Shared live-signal files. The statusline (any interactive session) writes the snapshot;
+# the standalone oracle timer AND this daemon's own builds write the oracle. Freshest wins.
+_CLAUDE_DIR = Path.home() / ".claude"
 
 
 def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
-             runner=subprocess.run, verifier=verify_repo, builder=run_build) -> dict:
+             runner=subprocess.run, verifier=verify_repo, builder=run_build,
+             oracle_path=None, snapshot_path=None) -> dict:
     state_dir = Path(state_dir)
     lock_path = state_dir / "current.lock"
     ledger_path = state_dir / "ledger.jsonl"
     gov_path = state_dir / "governor.json"
+    oracle_path = Path(oracle_path) if oracle_path else _CLAUDE_DIR / "usage-oracle.json"
+    snapshot_path = Path(snapshot_path) if snapshot_path else _CLAUDE_DIR / "usage-snapshot.json"
 
-    pace = compute_pace(now, cfg, state)
+    signal = read_signal(oracle_path, snapshot_path, now)
+    pace = compute_pace(now, cfg, state, signal)
     if pace.level == "pause":
         return {"action": "pause", "pace": pace}
 
@@ -72,17 +81,22 @@ def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
         if res.rate_limited:
             # Calibrate the ceiling from the spend at the 429 BEFORE anchoring resets it.
             update_ceiling_ema(state, state.window_spend_usd or res.cost_usd)
-            # If the result carried a structured reset time (api_error_status/message),
-            # anchor the window to it so the governor pauses exactly until it reopens.
-            if res.reset_at:
-                anchor_window(state, res.reset_at)
+            # Prefer the structured rate_limit_event reset; anchor so we pause until it reopens.
+            reset = res.rate_reset_at or res.reset_at
+            if reset:
+                anchor_window(state, reset)
+            # Persist the live status so the very next tick's signal reflects it immediately.
+            write_oracle(oracle_path, res.rate_status or "rejected", reset, "five_hour", now)
             set_status(it, "pending")
             notify(cfg, "paused",
                    reason=f"rate limited on {slug}"
-                          + (f", resets at {int(res.reset_at)}" if res.reset_at else ""),
+                          + (f", resets at {int(reset)}" if reset else ""),
                    runner=runner)
         else:
             record_spend(state, res.cost_usd, now)
+            # Per-build capture: keep the shared oracle warm from a benign (allowed) event.
+            if res.rate_status:
+                write_oracle(oracle_path, res.rate_status, res.rate_reset_at, "five_hour", now)
             green = (not res.is_error) and verifier(repo, runner=runner)
             status = "done" if green else "needs-review"
             set_status(it, status)

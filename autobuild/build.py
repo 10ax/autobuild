@@ -29,6 +29,8 @@ class BuildResult:
     rate_limited: bool = False
     reset_at: float | None = None
     api_error_status: object = None
+    rate_status: str | None = None       # allowed | rejected — from stream rate_limit_event
+    rate_reset_at: float | None = None    # 5h-window reset epoch from rate_limit_event
     raw: dict = field(default_factory=dict)
 
 
@@ -82,32 +84,66 @@ def _extract_reset(val) -> float | None:
 def build_argv(brief_path: Path, repo_root: Path, model: str, cfg: Config) -> list[str]:
     prompt = (f"Build backlog item: {brief_path}. Target repo dir: {repo_root}. "
               f"Follow the process in {Path(cfg.root)}/CLAUDE.md exactly.")
-    return ["claude", "-p", prompt, "--output-format", "json",
+    # stream-json (+ --verbose, required for it in print mode) so each build also emits the
+    # `rate_limit_event` carrying the real limit status + exact resetsAt. The final `result`
+    # event still carries everything the batch json result did.
+    return ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose",
             "--permission-mode", "bypassPermissions",
             "--add-dir", str(cfg.root), "--model", model]
 
 
-def _load_json(stdout: str) -> dict:
+def _iter_json(stdout: str):
+    """Yield JSON objects from build stdout: a batch object (compact or pretty) as one, or
+    stream-json as one object per line."""
+    s = stdout.strip()
+    if not s:
+        return
     try:
-        return json.loads(stdout)
+        yield json.loads(s)     # batch --output-format json (single object)
+        return
     except json.JSONDecodeError:
-        for line in reversed(stdout.strip().splitlines()):
-            try:
-                return json.loads(line)
-            except json.JSONDecodeError:
-                continue
-    return {}
+        pass
+    for line in s.splitlines():  # stream-json: one event per line
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            yield json.loads(line)
+        except json.JSONDecodeError:
+            continue
 
 
 def parse_result(stdout: str) -> BuildResult:
-    obj = _load_json(stdout)
-    if not obj:
+    events = [e for e in _iter_json(stdout) if isinstance(e, dict)]
+    if not events:
         return BuildResult(is_error=True, cost_usd=0.0, raw={})
+
+    # The final result: an explicit stream `result` event, else (batch) the object carrying
+    # the result fields.
+    obj = next((e for e in events if e.get("type") == "result"), None)
+    if obj is None:
+        obj = next((e for e in reversed(events)
+                    if "total_cost_usd" in e or "is_error" in e), {})
+
+    # Real-time limit status from any stream `rate_limit_event` (prefer the five_hour window).
+    rate_status = None
+    rate_reset_at = None
+    for e in events:
+        if e.get("type") == "rate_limit_event":
+            info = e.get("rate_limit_info") or {}
+            typ = info.get("rateLimitType")
+            if rate_status is None or typ == "five_hour":
+                if info.get("status") is not None:
+                    rate_status = info.get("status")
+                rt = info.get("resetsAt")
+                if isinstance(rt, (int, float)) and not isinstance(rt, bool):
+                    rate_reset_at = float(rt)
+
     is_error = bool(obj.get("is_error", False))
     api_error_status = obj.get("api_error_status")
 
-    # Primary signal: the structured api_error_status field from headless `claude -p`.
-    rate_limited = _looks_rate_limited(api_error_status)
+    # Primary signals: a rejected rate_limit_event, or the structured api_error_status field.
+    rate_limited = (rate_status == "rejected") or _looks_rate_limited(api_error_status)
     # Fallback for older/unknown shapes: scan only the human MESSAGE fields (never ids or
     # the whole object), and only on an errored run — so neither a benign id containing
     # "429" nor a *successful* build whose content mentions "rate limit" is misread.
@@ -115,7 +151,10 @@ def parse_result(stdout: str) -> BuildResult:
         msg = " ".join(str(obj.get(k, "")) for k in _MSG_FIELDS).lower()
         rate_limited = any(m in msg for m in _RL_MARKERS)
 
-    reset_at = _extract_reset(api_error_status)
+    # Reset time: prefer the structured rate_limit_event, then api_error_status, then a regex.
+    reset_at = rate_reset_at
+    if reset_at is None:
+        reset_at = _extract_reset(api_error_status)
     if reset_at is None:
         m = _RESET.search(json.dumps(obj))
         reset_at = float(m.group(1)) if m else None
@@ -128,6 +167,8 @@ def parse_result(stdout: str) -> BuildResult:
         rate_limited=rate_limited,
         reset_at=reset_at,
         api_error_status=api_error_status,
+        rate_status=rate_status,
+        rate_reset_at=rate_reset_at,
         raw=obj,
     )
 

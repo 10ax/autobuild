@@ -5,6 +5,7 @@ from autobuild.config import Config
 from autobuild.ledger import GovernorState
 from autobuild.governor import (in_quiet_hours, compute_pace, record_spend,
                                 update_ceiling_ema, anchor_window, WINDOW_SECONDS)
+from autobuild.usage import UsageSignal
 
 TZ = ZoneInfo("Europe/Rome")
 def _cfg(**kw):
@@ -89,3 +90,27 @@ class TestGovernor(unittest.TestCase):
         st = GovernorState(learned_ceiling_usd=10.0, window_spend_usd=9.9,
                            window_start=_at(23).timestamp() - (WINDOW_SECONDS + 10))
         self.assertEqual(compute_pace(_at(23), _cfg(max_concurrency=3), st).level, "high")
+
+    # --- live UsageSignal integration ---
+    def test_live_rejected_status_pauses(self):
+        st = GovernorState(learned_ceiling_usd=10.0, window_spend_usd=0.0,
+                           window_start=_at(23).timestamp())
+        p = compute_pace(_at(23), _cfg(max_concurrency=3), st, signal=UsageSignal(status="rejected"))
+        self.assertEqual(p.level, "pause")
+
+    def test_live_percentage_drives_headroom_when_uncalibrated(self):
+        # no EMA ceiling, but a fresh live % → the governor still ramps on real headroom
+        p = compute_pace(_at(23), _cfg(max_concurrency=3), GovernorState(),
+                         signal=UsageSignal(used_pct_5h=10.0))
+        self.assertEqual(p.level, "high")
+
+    def test_live_percentage_overrides_ema(self):
+        # EMA alone (ceiling 10, spent 9) would clamp to "low"; live % says only 20% used → high
+        st = GovernorState(learned_ceiling_usd=10.0, window_spend_usd=9.0,
+                           window_start=_at(23).timestamp())
+        p = compute_pace(_at(23), _cfg(max_concurrency=3), st, signal=UsageSignal(used_pct_5h=20.0))
+        self.assertEqual(p.level, "high")
+
+    def test_live_percentage_near_cap_pauses(self):
+        p = compute_pace(_at(23), _cfg(), GovernorState(), signal=UsageSignal(used_pct_5h=98.0))
+        self.assertEqual(p.level, "pause")

@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, date, time
 from autobuild.config import Config
 from autobuild.ledger import GovernorState
+from autobuild.usage import UsageSignal
 
 WINDOW_SECONDS = 5 * 3600
 
@@ -70,28 +71,38 @@ def record_spend(state: GovernorState, cost_usd: float, now: datetime) -> Govern
     return state
 
 
-def compute_pace(now: datetime, cfg: Config, state: GovernorState) -> Pace:
+def compute_pace(now: datetime, cfg: Config, state: GovernorState,
+                 signal: UsageSignal | None = None) -> Pace:
     if in_quiet_hours(now, cfg):
         return Pace("pause", 0, False, cfg.default_model)
     wk = weekly_headroom(cfg, state)
     if cfg.weekly_reserve_enabled and cfg.weekly_target_usd > 0 and wk < cfg.weekly_reserve_frac:
         return Pace("pause", 0, False, cfg.default_model)
     now_ts = now.timestamp()
+    # Live hard stop: the API currently rejects the 5h window (and overage is disabled/
+    # out-of-credits, so there is no spill zone). Trust it over any inference.
+    if signal is not None and signal.status == "rejected":
+        return Pace("pause", 0, False, cfg.default_model)
     # Rate-limit cooldown: after a 429 the window is anchored to its FUTURE reset
     # (see anchor_window). Until the clock reaches it we are blocked, so pause — even
     # though window_spend is 0, which would otherwise read as full headroom.
     if state.window_start is not None and now_ts < state.window_start:
         return Pace("pause", 0, False, cfg.default_model)
-    # Uncalibrated: run conservatively while we learn the ceiling.
-    if state.learned_ceiling_usd <= 0:
-        return Pace("low", 1, False, "sonnet")
     # A fully-elapsed window is a fresh window for pacing even if no spend event has
     # reset it yet — this is what lets the governor recover from a rate-limit pause
     # (record_spend, the only other reset path, is not called while paused).
     within_window = (state.window_start is not None
                      and 0 <= now_ts - state.window_start < WINDOW_SECONDS)
-    effective_spend = state.window_spend_usd if within_window else 0.0
-    wh = max(0.0, 1.0 - effective_spend / state.learned_ceiling_usd)
+    # Headroom: prefer a fresh live 5h percentage (exact); else the EMA-learned ceiling;
+    # else we are uncalibrated with no live signal → run conservatively.
+    live_pct = signal.used_pct_5h if signal is not None else None
+    if live_pct is not None:
+        wh = max(0.0, 1.0 - live_pct / 100.0)
+    elif state.learned_ceiling_usd > 0:
+        effective_spend = state.window_spend_usd if within_window else 0.0
+        wh = max(0.0, 1.0 - effective_spend / state.learned_ceiling_usd)
+    else:
+        return Pace("low", 1, False, "sonnet")
     # Late-in-window clamp: never start a wide fan-out that will die at the cap.
     late = within_window and (now_ts - state.window_start) / WINDOW_SECONDS > 0.8
     if wh <= 0.05:

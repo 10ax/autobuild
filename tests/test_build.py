@@ -8,6 +8,9 @@ class _CP:  # fake CompletedProcess
     def __init__(self, stdout="", returncode=0):
         self.stdout, self.stderr, self.returncode = stdout, "", returncode
 
+def _stream(*events):  # build a stream-json (JSONL) stdout blob
+    return "\n".join(json.dumps(e) for e in events)
+
 class TestBuild(unittest.TestCase):
     def test_argv_includes_safety_flags_and_model(self):
         argv = build_argv(Path("/b/x.md"), Path("/r/x"), "opus", Config(root="/home/tenax/autobuild"))
@@ -110,3 +113,43 @@ class TestBuild(unittest.TestCase):
         out = json.dumps({"is_error": True,
                           "api_error_status": {"request_id": "req_4290xZ", "type": "overloaded_error"}})
         self.assertFalse(parse_result(out).rate_limited)
+
+    # --- stream-json (per-build rate_limit_event capture) ---
+    def test_argv_uses_stream_json_verbose(self):
+        argv = build_argv(Path("/b/x.md"), Path("/r/x"), "opus", Config(root="/home/tenax/autobuild"))
+        self.assertEqual(argv[argv.index("--output-format") + 1], "stream-json")
+        self.assertIn("--verbose", argv)
+
+    def test_parse_stream_json_captures_rate_limit_event(self):
+        out = _stream(
+            {"type": "system", "subtype": "init", "session_id": "s9"},
+            {"type": "rate_limit_event", "rate_limit_info":
+                {"status": "allowed", "resetsAt": 1784893800, "rateLimitType": "five_hour"}},
+            {"type": "result", "is_error": False, "total_cost_usd": 0.3,
+             "usage": {"output_tokens": 5}, "session_id": "s9"},
+        )
+        r = parse_result(out)
+        self.assertFalse(r.is_error)
+        self.assertAlmostEqual(r.cost_usd, 0.3)
+        self.assertEqual(r.session_id, "s9")
+        self.assertEqual(r.rate_status, "allowed")
+        self.assertEqual(r.rate_reset_at, 1784893800.0)
+        self.assertFalse(r.rate_limited)          # "allowed" is not a limit
+
+    def test_parse_stream_json_rejected_is_rate_limited(self):
+        out = _stream(
+            {"type": "rate_limit_event", "rate_limit_info":
+                {"status": "rejected", "resetsAt": 1784900000, "rateLimitType": "five_hour"}},
+            {"type": "result", "is_error": True, "total_cost_usd": 0.0, "subtype": "error"},
+        )
+        r = parse_result(out)
+        self.assertEqual(r.rate_status, "rejected")
+        self.assertTrue(r.rate_limited)
+        self.assertEqual(r.reset_at, 1784900000.0)
+
+    def test_parse_batch_json_still_works_and_has_no_rate_status(self):
+        out = json.dumps({"type": "result", "is_error": False, "total_cost_usd": 0.42})
+        r = parse_result(out)
+        self.assertAlmostEqual(r.cost_usd, 0.42)
+        self.assertIsNone(r.rate_status)
+        self.assertFalse(r.rate_limited)
