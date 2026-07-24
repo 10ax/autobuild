@@ -59,6 +59,35 @@ class TestBuild(unittest.TestCase):
         self.assertTrue(r.is_error)
         self.assertAlmostEqual(r.duration_s, 30.0)
 
+    def test_run_build_timeout_recovers_partial_cost_and_signal(self):
+        # a killed build's captured stdout may still carry cost / a rate_limit_event — recover it
+        # (keeps weekly spend + the oracle warm) while still flagging the run as errored/incomplete.
+        partial = _stream(
+            {"type": "rate_limit_event", "rate_limit_info":
+                {"status": "allowed", "resetsAt": 1784900000, "rateLimitType": "five_hour"}},
+            {"type": "result", "is_error": False, "total_cost_usd": 3.5},
+        )
+        def boom(*a, **k):
+            raise subprocess.TimeoutExpired(cmd="claude", timeout=1, output=partial)
+        clock = iter([100.0, 160.0]).__next__
+        r = run_build(Path("/b/x.md"), Path("/r/x"), "opus",
+                      Pace("high", 2, True, "opus"), Config(root="/tmp"), runner=boom, clock=clock)
+        self.assertTrue(r.is_error)                 # timeout → incomplete → error, always
+        self.assertTrue(r.raw.get("timeout"))
+        self.assertAlmostEqual(r.cost_usd, 3.5)     # spend recovered from partial stream
+        self.assertEqual(r.rate_status, "allowed")  # live signal recovered too
+        self.assertAlmostEqual(r.duration_s, 60.0)
+
+    def test_run_build_silences_build_stop_hook_via_env(self):
+        captured = {}
+        def spy(argv, **k):
+            captured.update(k.get("env") or {})
+            return _CP(stdout=json.dumps({"is_error": False, "total_cost_usd": 1.0}))
+        run_build(Path("/b/x.md"), Path("/r/x"), "sonnet", Pace("low", 1, False, "sonnet"),
+                  Config(root="/tmp"), runner=spy)
+        self.assertEqual(captured.get("AUTOBUILD_NO_NOTIFY"), "1")  # build's own Stop hook stays quiet
+        self.assertIn("PACE", captured)                            # existing env still passed
+
     def test_verify_repo_gates_on_exit_codes(self):
         self.assertTrue(verify_repo(Path("/r/x"), runner=lambda *a, **k: _CP(returncode=0)))
         self.assertFalse(verify_repo(Path("/r/x"), runner=lambda *a, **k: _CP(returncode=1)))

@@ -8,8 +8,10 @@ weekend_from = "fri 19:00"
 weekend_to   = "mon 08:00"
 
 [pace]
-max_concurrency = 3
-per_project_timeout_min = 30
+# First real run (2026-07-24): 3 concurrent Opus builds all blew past a 30-min cap mid-build
+# (2000-3600 files each). Give each build far more headroom and run fewer at once.
+max_concurrency = 2
+per_project_timeout_min = 120
 opus_escalation = true
 weekly_reserve_enabled = false
 weekly_reserve_frac = 0.12

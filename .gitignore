@@ -1,3 +1,8 @@
 .superpowers/
 __pycache__/
 *.pyc
+# built projects (each has its own git repo) and runtime state are not part of the infra repo
+projects/*
+!projects/.gitkeep
+state/*
+!state/.gitkeep

@@ -178,14 +178,25 @@ def parse_result(stdout: str) -> BuildResult:
 def run_build(brief_path: Path, repo_root: Path, model: str, pace: Pace,
               cfg: Config, runner=subprocess.run, clock=time.monotonic) -> BuildResult:
     argv = build_argv(brief_path, repo_root, model, cfg)
-    env = dict(os.environ, PACE=("high" if pace.subagents else "low"))
+    # AUTOBUILD_NO_NOTIFY marks THIS build's headless claude (and any subagents) so its Stop hook
+    # stays quiet — the daemon sends its own richer ✅/⚠️. Scoped to the build env only, never the
+    # daemon, so the daemon's own notify path is unaffected.
+    env = dict(os.environ, PACE=("high" if pace.subagents else "low"), AUTOBUILD_NO_NOTIFY="1")
     start = clock()
     try:
         cp = runner(argv, capture_output=True, text=True,
                     timeout=cfg.per_project_timeout_min * 60, env=env)
-    except subprocess.TimeoutExpired:
-        return BuildResult(is_error=True, cost_usd=0.0,
-                           duration_s=clock() - start, raw={"timeout": True})
+    except subprocess.TimeoutExpired as e:
+        # A killed build's captured stdout may still carry cost / a rate_limit_event — recover what
+        # we can (keeps weekly spend + the oracle warm) but the run is incomplete, so flag error.
+        partial = e.stdout or e.output or ""
+        if isinstance(partial, bytes):
+            partial = partial.decode("utf-8", "replace")
+        result = parse_result(partial)
+        result.is_error = True
+        result.duration_s = clock() - start
+        result.raw = {**(result.raw or {}), "timeout": True}
+        return result
     except OSError as e:
         return BuildResult(is_error=True, cost_usd=0.0,
                            duration_s=clock() - start, raw={"error": str(e)})
