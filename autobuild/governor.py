@@ -86,6 +86,20 @@ def anchor_window(state: GovernorState, reset_epoch: float) -> GovernorState:
     return state
 
 
+def roll_day(state: GovernorState, now: datetime, signal: UsageSignal | None) -> GovernorState:
+    """Maintain the per-day weekly-% baseline used by the daily cap. The baseline is the LOWEST
+    live 7d% seen on the current calendar day (cfg-tz `now`); it re-baselines at midnight and
+    whenever the weekly meter drops (i.e. the weekly window reset). No-op without a live 7d%."""
+    wk7 = signal.used_pct_7d if signal is not None else None
+    if wk7 is None:
+        return state
+    today = now.date().isoformat()
+    if state.day_start != today or state.day_start_pct is None or wk7 < state.day_start_pct:
+        state.day_start = today
+        state.day_start_pct = wk7
+    return state
+
+
 def record_spend(state: GovernorState, cost_usd: float, now: datetime) -> GovernorState:
     now_ts = now.timestamp()
     if state.window_start is None or now_ts - state.window_start >= WINDOW_SECONDS:
@@ -114,6 +128,17 @@ def compute_pace(now: datetime, cfg: Config, state: GovernorState,
     # out-of-credits, so there is no spill zone). Trust it over any inference.
     if signal is not None and signal.status == "rejected":
         return Pace("pause", 0, False, cfg.default_model)
+    # Weekly usage budget (live 7d %): reserve headroom for the user's own daytime work and
+    # cap the daemon's own draw per day. The 7d % is statusline-only, so when the guard is on
+    # but the % is unavailable we FAIL CLOSED (pause) rather than run blind past the budget.
+    if cfg.weekly_guard_enabled and signal is not None:
+        wk7 = signal.used_pct_7d
+        if wk7 is None:
+            return Pace("pause", 0, False, cfg.default_model)
+        if wk7 >= cfg.weekly_ceiling_pct:                       # reserve the rest for the user
+            return Pace("pause", 0, False, cfg.default_model)
+        if state.day_start_pct is not None and wk7 - state.day_start_pct >= cfg.daily_cap_pct:
+            return Pace("pause", 0, False, cfg.default_model)   # per-day draw cap reached
     # Rate-limit cooldown: after a 429 the window is anchored to its FUTURE reset
     # (see anchor_window). Until the clock reaches it we are blocked, so pause — even
     # though window_spend is 0, which would otherwise read as full headroom.

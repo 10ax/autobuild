@@ -23,6 +23,11 @@ class Config:
     weekly_reserve_enabled: bool = False
     weekly_reserve_frac: float = 0.12
     weekly_target_usd: float = 0.0
+    # Live weekly-usage guard (uses the statusline 7d %). Daemon pauses at weekly_ceiling_pct
+    # (reserve the rest for the user) and adds at most daily_cap_pct weekly-% points per day.
+    weekly_guard_enabled: bool = True
+    weekly_ceiling_pct: float = 50.0
+    daily_cap_pct: float = 10.0
     stack: str = "typescript"
     default_model: str = "sonnet"
     telegram_script: str = "~/.claude/notify-telegram.sh"
@@ -51,6 +56,9 @@ def load_config(path: Path, root: Path | None = None) -> Config:
         weekly_reserve_enabled=bool(pace.get("weekly_reserve_enabled", False)),
         weekly_reserve_frac=float(pace.get("weekly_reserve_frac", 0.12)),
         weekly_target_usd=float(pace.get("weekly_target_usd", 0.0)),
+        weekly_guard_enabled=bool(pace.get("weekly_guard_enabled", True)),
+        weekly_ceiling_pct=float(pace.get("weekly_ceiling_pct", 50.0)),
+        daily_cap_pct=float(pace.get("daily_cap_pct", 10.0)),
         stack=build.get("stack", "typescript"),
         default_model=build.get("default_model", "sonnet"),
         telegram_script=notify.get("telegram_script", "~/.claude/notify-telegram.sh"),

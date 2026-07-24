@@ -11,7 +11,7 @@ from autobuild.config import Config, load_config
 from autobuild.ledger import (GovernorState, load_governor_state, save_governor_state,
                               append_ledger)
 from autobuild.governor import (Pace, compute_pace, record_spend, update_ceiling_ema,
-                                anchor_window, next_active_time)
+                                anchor_window, roll_day, next_active_time)
 from autobuild.backlog import scan_backlog, select_pending, set_status, add_lock, clear_lock, read_lock
 from autobuild.build import run_build, verify_repo, BuildResult
 from autobuild.notify import notify
@@ -34,6 +34,7 @@ def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
     snapshot_path = Path(snapshot_path) if snapshot_path else _CLAUDE_DIR / "usage-snapshot.json"
 
     signal = read_signal(oracle_path, snapshot_path, now)
+    roll_day(state, now, signal)          # maintain the per-day weekly-% baseline
     pace = compute_pace(now, cfg, state, signal)
     if pace.level == "pause":
         return {"action": "pause", "pace": pace}

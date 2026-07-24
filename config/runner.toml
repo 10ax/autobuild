@@ -14,6 +14,11 @@ opus_escalation = true
 weekly_reserve_enabled = false
 weekly_reserve_frac = 0.12
 weekly_target_usd = 0.0
+# Live weekly-usage guard (reads the statusline 7d %). Keeps a reserve for your own daytime
+# work and throttles the daemon's daily draw. Needs a fresh 7d % to gate overnight builds.
+weekly_guard_enabled = true
+weekly_ceiling_pct = 50.0   # pause when weekly usage reaches this % (reserve the rest for you)
+daily_cap_pct = 10.0        # add at most this many weekly-% points per calendar day
 
 [build]
 stack = "typescript"

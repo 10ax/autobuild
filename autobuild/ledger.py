@@ -35,6 +35,8 @@ class GovernorState:
     window_spend_usd: float = 0.0
     learned_ceiling_usd: float = 0.0   # 0 => not yet calibrated
     weekly_spend_usd: float = 0.0
+    day_start: str = ""                # ISO date of the current daily-cap day
+    day_start_pct: float | None = None  # weekly-% baseline at day start (lowest 7d% seen today)
 
 
 def load_governor_state(path: Path) -> GovernorState:
