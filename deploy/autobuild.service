@@ -8,7 +8,7 @@ Type=simple
 WorkingDirectory=%h/autobuild
 Environment=PATH=%h/.local/bin:%h/.cargo/bin:%h/.nvm/versions/node/v22.16.0/bin:/usr/local/bin:/usr/bin:/bin
 # GitHub identity for the daemon + all its build subprocesses: the isolated gh config (account
-# 10ax, personal) and 10ax's commit authorship — leaves the interactive work-account (work) login alone.
+# 10ax, personal) and 10ax's commit authorship — leaves the user's separate interactive login alone.
 Environment=GH_CONFIG_DIR=%h/.config/gh-autobuild
 Environment=GIT_AUTHOR_NAME=10ax
 Environment=GIT_AUTHOR_EMAIL=157908022+10ax@users.noreply.github.com
