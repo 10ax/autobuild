@@ -1,0 +1,33 @@
+# deploy/autobuild-web.service  ->  ~/.config/systemd/user/autobuild-web.service
+# The autobuild web console (projects/autobuild-web), served locally and fronted by
+# `tailscale serve` at https://atlas.<tailnet>.ts.net. Reads autobuild's state + the usage
+# JSONs; writes only backlog/*.md and state/pause.
+[Unit]
+Description=Autobuild web console (night-shift instrument panel)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/autobuild/projects/autobuild-web
+Environment=PATH=%h/.local/bin:%h/.nvm/versions/node/v22.16.0/bin:/usr/local/bin:/usr/bin:/bin
+Environment=NODE_ENV=production
+Environment=PORT=8787
+Environment=HOST=127.0.0.1
+Environment=AUTOBUILD_HOME=%h/autobuild
+Environment=USAGE_SNAPSHOT_PATH=%h/.claude/usage-snapshot.json
+Environment=USAGE_ORACLE_PATH=%h/.claude/usage-oracle.json
+ExecStart=%h/.nvm/versions/node/v22.16.0/bin/node dist/server.js
+Restart=always
+RestartSec=5
+# Light sandbox: it writes only backlog/*.md and state/pause under ~/autobuild; everything else
+# (state reads, ~/.claude usage JSONs) is read-only, which ProtectSystem=strict still permits.
+# It spawns `systemctl --user is-active`/`journalctl --user` over the user bus for daemon status
+# and the live log tail.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+PrivateTmp=yes
+ReadWritePaths=%h/autobuild
+
+[Install]
+WantedBy=default.target
