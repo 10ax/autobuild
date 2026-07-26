@@ -33,6 +33,12 @@ def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
     oracle_path = Path(oracle_path) if oracle_path else _CLAUDE_DIR / "usage-oracle.json"
     snapshot_path = Path(snapshot_path) if snapshot_path else _CLAUDE_DIR / "usage-snapshot.json"
 
+    # Manual pause: the web console drops a state/pause flag. Honor it even inside an active
+    # window — nothing builds until the flag is removed. Distinct from a governor/rate-limit
+    # pause (the "manual" marker lets callers and the console tell them apart).
+    if (state_dir / "pause").exists():
+        return {"action": "pause", "pace": Pace("pause", 0, False, cfg.default_model), "manual": True}
+
     signal = read_signal(oracle_path, snapshot_path, now)
     roll_day(state, now, signal)          # maintain the per-day weekly-% baseline
     pace = compute_pace(now, cfg, state, signal)
@@ -101,7 +107,8 @@ def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
             status = "done" if green else "needs-review"
             set_status(it, status)
             append_ledger(ledger_path, {"slug": slug, "status": status,
-                                        "cost_usd": res.cost_usd, "at": now.isoformat()})
+                                        "cost_usd": res.cost_usd, "duration_s": res.duration_s,
+                                        "at": now.isoformat()})
             notifier(cfg, "done" if green else "needs-review", slug=slug, repo=str(repo),
                      tests="green" if green else "red", cost=res.cost_usd,
                      secs=res.duration_s, runner=runner)

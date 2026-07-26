@@ -11,3 +11,4 @@ docs/hustle/
 staging-backlog/
 backlog/*.md
 docs/superpowers/specs/
+.tokensave/

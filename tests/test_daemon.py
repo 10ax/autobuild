@@ -69,6 +69,30 @@ class TestDaemon(unittest.TestCase):
         self.assertEqual(item.meta["status"], "done")
         self.assertEqual(read_ledger(root / "state" / "ledger.jsonl")[0]["status"], "done")
 
+    def test_manual_pause_flag_pauses_and_builds_nothing(self):
+        # A state/pause file (written by the web console) forces a pause even inside an
+        # active build window, and nothing is built until it is removed.
+        root = _root(); built = []
+        (root / "state" / "pause").write_text('{"at":"2026-07-23T23:00:00","by":"console"}')
+        res = _run(
+            _C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
+            builder=lambda *a, **k: built.append(1) or BuildResult(is_error=False, cost_usd=0.1),
+            verifier=lambda *a, **k: True, **_sig(root),
+        )
+        self.assertEqual(res["action"], "pause")
+        self.assertTrue(res.get("manual"))   # distinguishable from a governor/rate-limit pause
+        self.assertEqual(built, [])
+
+    def test_ledger_records_build_duration(self):
+        root = _root()
+        _run(
+            _C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
+            builder=lambda *a, **k: BuildResult(is_error=False, cost_usd=0.5, duration_s=137.0),
+            verifier=lambda *a, **k: True, **_sig(root),
+        )
+        row = read_ledger(root / "state" / "ledger.jsonl")[0]
+        self.assertEqual(row["duration_s"], 137.0)   # duration persisted for the shift-log
+
     def test_red_verify_marks_needs_review(self):
         root = _root()
         _run(
