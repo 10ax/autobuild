@@ -25,3 +25,20 @@ class TestNotify(unittest.TestCase):
         notify(Config(root="/tmp", notify_on=["done"]), "done", slug="x",
                runner=lambda *a, **k: calls.append(a))
         self.assertEqual(len(calls), 1)
+
+    def test_format_done_for_a_documented_repo(self):
+        msg = format_message("done", slug="autodoc-dotfiles", repo="/home/tenax/dotfiles",
+                             branch="autodoc/2026-09-03", cost=1.2, secs=200)
+        self.assertIn("autodoc-dotfiles", msg)
+        self.assertIn("autodoc/2026-09-03", msg)
+        self.assertIn("/home/tenax/dotfiles", msg)
+        self.assertIn("3m20s", msg)
+        self.assertNotIn("None", msg)                 # no "tests None" leaking through
+
+    def test_format_needs_review_points_at_the_worktree(self):
+        msg = format_message("needs-review", slug="autodoc-dotfiles",
+                             repo="/home/tenax/dotfiles", branch="autodoc/2026-09-03",
+                             worktree="/home/tenax/autobuild/state/worktrees/autodoc-dotfiles",
+                             reason="dangling anchor in docs/CODE-MAP.md: x.py:9", secs=90)
+        self.assertIn("dangling anchor", msg)
+        self.assertIn("worktrees/autodoc-dotfiles", msg)

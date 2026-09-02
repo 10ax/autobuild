@@ -14,13 +14,22 @@ def _fmt_dur(seconds) -> str:
 
 
 def format_message(event: str, **kw) -> str:
+    # A `branch` means the docs lane: there are no tests to report, but there is a branch to
+    # review and — when it went red — a worktree left standing to look inside.
+    branch = kw.get("branch")
     if event == "done":
-        return (f"✅ autobuild: {kw.get('slug')} done — tests {kw.get('tests')}, "
+        what = f"branch {branch}" if branch else f"tests {kw.get('tests')}"
+        return (f"✅ autobuild: {kw.get('slug')} done — {what}, "
                 f"${kw.get('cost', 0):.2f}, {_fmt_dur(kw.get('secs'))}\n{kw.get('repo', '')}")
     if event == "needs-review":
         dur = f" ({_fmt_dur(kw['secs'])})" if kw.get("secs") else ""
+        tail = f"\n{kw.get('repo', '')}"
+        if branch:
+            tail += f" @ {branch}"
+        if kw.get("worktree"):
+            tail += f"\nworktree: {kw['worktree']}"
         return (f"⚠️ autobuild: {kw.get('slug')} needs review — "
-                f"{kw.get('reason', 'verification failed')}{dur}\n{kw.get('repo', '')}")
+                f"{kw.get('reason', 'verification failed')}{dur}{tail}")
     if event == "paused":
         return f"⏸ autobuild paused — {kw.get('reason', '')}"
     if event == "crash":

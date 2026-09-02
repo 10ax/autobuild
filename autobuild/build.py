@@ -83,15 +83,45 @@ def _extract_reset(val) -> float | None:
     return None
 
 
-def build_argv(brief_path: Path, repo_root: Path, model: str, cfg: Config) -> list[str]:
-    prompt = (f"Build backlog item: {brief_path}. Target repo dir: {repo_root}. "
-              f"Follow the process in {Path(cfg.root)}/CLAUDE.md exactly.")
+# The docs lane's prompt. `prompts/autodoc.md` is the source of truth when present; this
+# constant keeps the lane working (and unit-testable) if the file is missing.
+_AUTODOC_PROMPT = (
+    "Document the existing repo: {REPO}. Read and write ONLY inside the worktree "
+    "{WORKTREE} (a git worktree of that repo — cd there first). Brief: {BRIEF_PATH}. "
+    "Follow the process in {ROOT}/AUTODOC.md exactly."
+)
+
+
+def _autodoc_prompt(brief_path: Path, repo_root: Path, work_dir: Path, cfg: Config) -> str:
+    template = _AUTODOC_PROMPT
+    f = Path(cfg.root) / "prompts" / "autodoc.md"
+    try:
+        text = f.read_text().strip()
+        if text:
+            template = text
+    except OSError:
+        pass
+    return (template.replace("{REPO}", str(repo_root))
+                    .replace("{WORKTREE}", str(work_dir))
+                    .replace("{BRIEF_PATH}", str(brief_path))
+                    .replace("{ROOT}", str(Path(cfg.root))))
+
+
+def build_argv(brief_path: Path, repo_root: Path, model: str, cfg: Config,
+               mode: str = "build", work_dir: Path | None = None) -> list[str]:
+    if mode == "document":
+        prompt = _autodoc_prompt(brief_path, repo_root, Path(work_dir or repo_root), cfg)
+    else:
+        prompt = (f"Build backlog item: {brief_path}. Target repo dir: {repo_root}. "
+                  f"Follow the process in {Path(cfg.root)}/CLAUDE.md exactly.")
     # stream-json (+ --verbose, required for it in print mode) so each build also emits the
     # `rate_limit_event` carrying the real limit status + exact resetsAt. The final `result`
     # event still carries everything the batch json result did.
-    return ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose",
-            "--permission-mode", "bypassPermissions",
-            "--add-dir", str(cfg.root), "--model", model]
+    argv = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose",
+            "--permission-mode", "bypassPermissions", "--add-dir", str(cfg.root)]
+    if work_dir is not None:
+        argv += ["--add-dir", str(work_dir)]
+    return argv + ["--model", model]
 
 
 def _iter_json(stdout: str):
@@ -176,8 +206,9 @@ def parse_result(stdout: str) -> BuildResult:
 
 
 def run_build(brief_path: Path, repo_root: Path, model: str, pace: Pace,
-              cfg: Config, runner=subprocess.run, clock=time.monotonic) -> BuildResult:
-    argv = build_argv(brief_path, repo_root, model, cfg)
+              cfg: Config, mode: str = "build", work_dir: Path | None = None,
+              runner=subprocess.run, clock=time.monotonic) -> BuildResult:
+    argv = build_argv(brief_path, repo_root, model, cfg, mode=mode, work_dir=work_dir)
     # AUTOBUILD_NO_NOTIFY marks THIS build's headless claude (and any subagents) so its Stop hook
     # stays quiet — the daemon sends its own richer ✅/⚠️. Scoped to the build env only, never the
     # daemon, so the daemon's own notify path is unaffected.
@@ -185,7 +216,8 @@ def run_build(brief_path: Path, repo_root: Path, model: str, pace: Pace,
     start = clock()
     try:
         cp = runner(argv, capture_output=True, text=True,
-                    timeout=cfg.per_project_timeout_min * 60, env=env)
+                    timeout=cfg.per_project_timeout_min * 60, env=env,
+                    **({"cwd": str(work_dir)} if work_dir else {}))
     except subprocess.TimeoutExpired as e:
         # A killed build's captured stdout may still carry cost / a rate_limit_event — recover what
         # we can (keeps weekly spend + the oracle warm) but the run is incomplete, so flag error.

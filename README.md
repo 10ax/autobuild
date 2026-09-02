@@ -4,6 +4,32 @@ Autonomous overnight builder: seed a brief in `backlog/`, and outside 08:00–19
 Europe/Rome the runner writes a spec, TDD-builds a TypeScript repo under
 `projects/<slug>/`, verifies it, commits, and pings telegram.
 
+## Two lanes
+A brief's `mode` picks the lane:
+
+- `build` (default) — the above: write a spec, TDD-build a new project under `projects/<slug>/`,
+  verify with `npm test` + `tsc`. Playbook: `CLAUDE.md`.
+- `document` — write a doc set (README, CLAUDE.md, `docs/WORKING-ON-THIS.md`,
+  `docs/CODE-MAP.md`) into a repo that **already exists**, named by the brief's `repo` key.
+  Playbook: `AUTODOC.md`.
+
+The docs lane never touches your checkout: the agent writes in a `git worktree` under
+`state/worktrees/<slug>`, and the daemon commits only the doc set on a branch
+`autodoc/<date>` (never pushed). `verify_docs` gates that commit — it fails the run if a
+source file moved, if hand-written prose outside the `autodoc:begin/end` markers changed, or
+if a single `file:line` anchor in the code map does not resolve. A red run keeps its worktree
+so you can see what the agent saw.
+
+```bash
+bin/seed-autodoc-briefs.py --discover      # repos with commits attributed to Claude
+bin/seed-autodoc-briefs.py --seed          # dry run; --write to create the briefs
+bin/seed-autodoc-briefs.py --systemd       # the ReadWritePaths drop-in for the unit
+```
+Targets live in `config/autodoc-targets.toml` — that file is the authority, not discovery,
+and it stays local (it names your repos); `config/autodoc-targets.example.toml` is the
+template.
+Review a finished item with `git -C <repo> diff master..autodoc/<date>`.
+
 ## Seed work
 Copy `templates/brief.template.md` into `backlog/NNNN-slug.md`, fill Intent +
 Acceptance Criteria, set `status = "pending"`.

@@ -1,5 +1,9 @@
 # Autobuild — build process for one backlog item
 
+*This is the **build** lane's playbook (`mode = "build"`, the default): create a new project
+from a brief. Items with `mode = "document"` follow `AUTODOC.md` instead — they document a
+repo that already exists and may not change code at all.*
+
 You are running headless and unattended. There is NO human to ask. Produce a
 complete, tested TypeScript/Node project from the given backlog brief, or leave a
 clearly-flagged `needs-review` branch. Never push to any remote.

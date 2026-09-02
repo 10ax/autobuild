@@ -12,3 +12,10 @@ staging-backlog/
 backlog/*.md
 docs/superpowers/specs/
 .tokensave/
+# local session handoff — not for the public repo
+HANDOFF.md
+# the autodoc target list (and the systemd drop-in generated from it) name the operator's
+# own repos — local content, like the briefs above. config/autodoc-targets.example.toml is
+# the committed template.
+config/autodoc-targets.toml
+deploy/autodoc-targets.conf

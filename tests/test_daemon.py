@@ -5,6 +5,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 from autobuild.config import Config
 from autobuild.ledger import GovernorState, read_ledger
+from autobuild.autodoc import AutodocError, AutodocPlan
 from autobuild.build import BuildResult
 from autobuild.backlog import scan_backlog
 from autobuild.daemon import run_once as _run_once
@@ -242,5 +243,133 @@ class TestDaemon(unittest.TestCase):
             verifier=lambda *a, **k: True, **sig,
         )
         self.assertEqual(res["action"], "built")   # 20% < 50%, daily delta 0 → runs
+        item = [i for i in scan_backlog(root / "backlog") if i.meta["slug"] == "alpha"][0]
+        self.assertEqual(item.meta["status"], "done")
+
+
+# ---- the docs lane ----------------------------------------------------------------
+DOC_BRIEF = '''+++
+spec_version = "1.0"
+slug = "autodoc-target"
+title = "Autodoc: target"
+tier = "docs"
+mode = "document"
+repo = "{repo}"
+priority = 9
+status = "pending"
++++
+## Intent
+Document the target repo.
+
+## Acceptance Criteria
+A1. The doc set exists and every anchor resolves.
+'''
+
+
+def _doc_root():
+    """A root whose only backlog item is a document brief pointing at a git repo."""
+    d = Path(tempfile.mkdtemp())
+    (d / "backlog").mkdir(); (d / "projects").mkdir(); (d / "state").mkdir()
+    target = d / "target"
+    (target / ".git").mkdir(parents=True)
+    (d / "backlog" / "doc.md").write_text(DOC_BRIEF.format(repo=target))
+    return d, target
+
+
+class _Ops:
+    """Stand-in for autobuild.autodoc — records the lane's git choreography."""
+
+    def __init__(self, verify_errors=None, prepare_raises=False):
+        self.calls, self.verify_errors = [], list(verify_errors or [])
+        self.prepare_raises = prepare_raises
+
+    def prepare_worktree(self, repo, slug, worktrees_dir, date, runner=None):
+        self.calls.append(("prepare", str(repo), slug, date))
+        if self.prepare_raises:
+            raise AutodocError("worktree path occupied")
+        return AutodocPlan(repo=Path(repo), worktree=Path(worktrees_dir) / slug,
+                           branch=f"autodoc/{date}", base_sha="deadbeef", slug=slug)
+
+    def verify_docs(self, plan, runner=None):
+        self.calls.append(("verify", plan.slug))
+        return list(self.verify_errors)
+
+    def commit_docs(self, plan, message, runner=None, wip=False):
+        self.calls.append(("commit", plan.slug, wip))
+        return True
+
+    def remove_worktree(self, plan, runner=None):
+        self.calls.append(("remove", plan.slug))
+
+
+def _capture_builder(seen, **result_kw):
+    def builder(brief, repo, model, pace, cfg, mode="build", work_dir=None, runner=None):
+        seen.append({"repo": Path(repo), "mode": mode, "work_dir": work_dir})
+        return BuildResult(**{"is_error": False, "cost_usd": 0.3, **result_kw})
+    return builder
+
+
+class TestDocsLane(unittest.TestCase):
+    def test_document_item_targets_the_front_matter_repo(self):
+        root, target = _doc_root()
+        ops, seen, notes = _Ops(), [], []
+        _run(_C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
+             builder=_capture_builder(seen), autodoc_ops=ops, notes=notes, **_sig(root))
+        self.assertEqual(seen[0]["repo"], target)            # not root/projects/<slug>
+        self.assertEqual(seen[0]["mode"], "document")
+        self.assertEqual(seen[0]["work_dir"],
+                         root / "state" / "worktrees" / "autodoc-target")
+        self.assertEqual([c[0] for c in ops.calls], ["prepare", "verify", "commit", "remove"])
+        self.assertFalse([c for c in ops.calls if c[0] == "commit"][0][2])   # not WIP
+        item = [i for i in scan_backlog(root / "backlog")][0]
+        self.assertEqual(item.meta["status"], "done")
+        row = read_ledger(root / "state" / "ledger.jsonl")[0]
+        self.assertEqual(row["mode"], "document")
+        self.assertEqual(row["branch"], "autodoc/2026-07-23")
+        self.assertEqual(row["repo"], str(target))
+        self.assertEqual(notes[0][0], "done")
+        self.assertIn("autodoc/2026-07-23", notes[0][1]["branch"])
+
+    def test_failed_verify_keeps_the_worktree_and_commits_wip(self):
+        root, target = _doc_root()
+        ops, notes = _Ops(verify_errors=["dangling anchor in docs/CODE-MAP.md: x.py:9"]), []
+        _run(_C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
+             builder=_capture_builder([]), autodoc_ops=ops, notes=notes, **_sig(root))
+        self.assertEqual([c[0] for c in ops.calls], ["prepare", "verify", "commit"])
+        self.assertTrue([c for c in ops.calls if c[0] == "commit"][0][2])     # WIP commit
+        self.assertNotIn("remove", [c[0] for c in ops.calls])                 # left to inspect
+        item = [i for i in scan_backlog(root / "backlog")][0]
+        self.assertEqual(item.meta["status"], "needs-review")
+        self.assertEqual(notes[0][0], "needs-review")
+        self.assertIn("dangling anchor", notes[0][1]["reason"])
+        self.assertIn("worktrees/autodoc-target", notes[0][1]["worktree"])
+
+    def test_unpreparable_worktree_never_runs_the_agent(self):
+        root, _ = _doc_root()
+        ops, seen = _Ops(prepare_raises=True), []
+        _run(_C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
+             builder=_capture_builder(seen), autodoc_ops=ops, **_sig(root))
+        self.assertEqual(seen, [])
+        item = [i for i in scan_backlog(root / "backlog")][0]
+        self.assertEqual(item.meta["status"], "needs-review")
+
+    def test_rate_limited_document_item_requeues_without_committing(self):
+        root, _ = _doc_root()
+        ops = _Ops()
+        reset = NIGHT.timestamp() + 3600
+        _run(_C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
+             builder=_capture_builder([], is_error=True, rate_limited=True, reset_at=reset),
+             autodoc_ops=ops, **_sig(root))
+        self.assertNotIn("commit", [c[0] for c in ops.calls])
+        item = [i for i in scan_backlog(root / "backlog")][0]
+        self.assertEqual(item.meta["status"], "pending")
+
+    def test_build_item_never_touches_the_docs_lane(self):
+        root = _root()
+        ops = _Ops()
+        _run(_C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
+             builder=lambda *a, **k: BuildResult(is_error=False, cost_usd=0.5),
+             verifier=lambda *a, **k: True, autodoc_ops=ops, **_sig(root))
+        self.assertEqual(ops.calls, [])
         item = [i for i in scan_backlog(root / "backlog") if i.meta["slug"] == "alpha"][0]
         self.assertEqual(item.meta["status"], "done")

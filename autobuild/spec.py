@@ -4,9 +4,12 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-TIERS = {"script", "library", "service"}
+TIERS = {"script", "library", "service", "docs"}
 STATUSES = {"pending", "building", "done", "needs-review"}
 MODELS = {"auto", "sonnet", "opus"}
+# Lanes: "build" creates a new project under projects/<slug>; "document" writes a doc set
+# into an existing repo named by the brief's `repo` key (see AUTODOC.md).
+MODES = {"build", "document"}
 SPEC_SECTIONS = ["Intent", "Ubiquitous Language", "Domain Model", "Requirements",
                  "Interfaces", "Acceptance Criteria", "Non-Goals", "Constraints"]
 BRIEF_SECTIONS = ["Intent", "Acceptance Criteria"]
@@ -62,6 +65,23 @@ def validate_spec(doc: SpecDoc, level: str = "spec") -> list[str]:
         errors.append(f"model must be one of {sorted(MODELS)}")
     if not _SLUG.match(str(meta.get("slug", ""))):
         errors.append("slug must be kebab-case")
+    mode = meta.get("mode", "build")
+    if mode not in MODES:
+        errors.append(f"mode must be one of {sorted(MODES)}")
+    repo = meta.get("repo")
+    if mode == "document":
+        if not repo:
+            errors.append("mode=document requires a repo path in the front-matter")
+        else:
+            target = Path(str(repo)).expanduser()
+            if not target.is_dir():
+                errors.append(f"repo does not exist: {target}")
+            elif not (target / ".git").exists():
+                errors.append(f"repo is not a git repo: {target}")
+    elif repo is not None:
+        errors.append("repo is only allowed with mode=document")
+    if meta.get("tier") == "docs" and mode != "document":
+        errors.append('tier "docs" requires mode = "document"')
     required = BRIEF_SECTIONS if level == "brief" else SPEC_SECTIONS
     for s in required:
         v = doc.sections.get(s, "").strip()

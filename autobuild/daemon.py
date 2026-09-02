@@ -14,6 +14,8 @@ from autobuild.governor import (Pace, compute_pace, record_spend, update_ceiling
                                 anchor_window, roll_day, next_active_time)
 from autobuild.backlog import scan_backlog, select_pending, set_status, add_lock, clear_lock, read_lock
 from autobuild.build import run_build, verify_repo, BuildResult
+from autobuild import autodoc as _autodoc
+from autobuild.autodoc import AutodocError
 from autobuild.notify import notify
 from autobuild.spec import validate_spec
 from autobuild.usage import read_signal, write_oracle
@@ -23,9 +25,53 @@ from autobuild.usage import read_signal, write_oracle
 _CLAUDE_DIR = Path.home() / ".claude"
 
 
+def _target(cfg: Config, item) -> tuple[str, Path]:
+    """The lane an item runs in and the repo it works on. `build` items own a fresh dir
+    under projects/; `document` items point at a repo that already exists."""
+    mode = item.meta.get("mode", "build")
+    if mode == "document":
+        return mode, Path(str(item.meta.get("repo", ""))).expanduser()
+    return mode, cfg.root / "projects" / item.meta["slug"]
+
+
+def _commit_message(item, plan, wip: bool = False) -> str:
+    head = "docs(autodoc) WIP:" if wip else "docs(autodoc):"
+    return (f"{head} README, CLAUDE.md, working guide and code map\n\n"
+            f"Written by autobuild's autodoc lane from {item.path.name}, "
+            f"on top of {plan.base_sha[:8]}.\n\n"
+            "Co-Authored-By: Claude <noreply@anthropic.com>")
+
+
+def _finish_document(item, repo: Path, plan, res: BuildResult, autodoc_ops,
+                     runner) -> tuple[str, dict, dict]:
+    """Verify the doc set, commit it, and tear the worktree down when green.
+
+    Returns (status, extra ledger fields, extra notification fields). A red run keeps its
+    worktree: the WIP commit says what the agent produced, the worktree says what it saw.
+    """
+    if plan is None:
+        reason = str((res.raw or {}).get("autodoc_error", "worktree preparation failed"))
+        return "needs-review", {"mode": "document", "repo": str(repo)}, {"reason": reason}
+
+    errs = [] if res.is_error else list(autodoc_ops.verify_docs(plan, runner=runner))
+    extra = {"mode": "document", "repo": str(repo), "branch": plan.branch}
+    if (not res.is_error) and not errs:
+        autodoc_ops.commit_docs(plan, _commit_message(item, plan), runner=runner)
+        autodoc_ops.remove_worktree(plan, runner=runner)
+        return "done", extra, {"branch": plan.branch}
+
+    autodoc_ops.commit_docs(plan, _commit_message(item, plan, wip=True), runner=runner,
+                            wip=True)
+    reason = "; ".join(errs[:3]) or str((res.raw or {}).get("error", "agent run failed"))
+    extra |= {"worktree": str(plan.worktree), "reason": reason}
+    return "needs-review", extra, {"branch": plan.branch, "worktree": str(plan.worktree),
+                                   "reason": reason}
+
+
 def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
              runner=subprocess.run, verifier=verify_repo, builder=run_build,
-             oracle_path=None, snapshot_path=None, notifier=notify) -> dict:
+             oracle_path=None, snapshot_path=None, notifier=notify,
+             autodoc_ops=_autodoc) -> dict:
     state_dir = Path(state_dir)
     lock_path = state_dir / "current.lock"
     ledger_path = state_dir / "ledger.jsonl"
@@ -71,19 +117,32 @@ def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
 
     def _one(it):
         slug = it.meta["slug"]
-        repo = cfg.root / "projects" / slug
+        mode, repo = _target(cfg, it)
         set_status(it, "building")
-        add_lock(lock_path, {"slug": slug, "repo": str(repo),
-                             "started_at": now.isoformat(), "model": pace.model})
-        res = builder(it.path, repo, pace.model, pace, cfg, runner=runner)
-        return it, repo, res
+        entry = {"slug": slug, "repo": str(repo), "started_at": now.isoformat(),
+                 "model": pace.model, "mode": mode}
+        plan = None
+        if mode == "document":
+            # The daemon owns every git write in this lane; the agent only writes files.
+            try:
+                plan = autodoc_ops.prepare_worktree(repo, slug, state_dir / "worktrees",
+                                                    now.strftime("%Y-%m-%d"), runner=runner)
+            except AutodocError as e:
+                add_lock(lock_path, entry)
+                return it, mode, repo, None, BuildResult(
+                    is_error=True, cost_usd=0.0, raw={"autodoc_error": str(e)})
+            entry["branch"] = plan.branch
+        add_lock(lock_path, entry)
+        extra = {"mode": mode, "work_dir": plan.worktree} if plan else {}
+        res = builder(it.path, repo, pace.model, pace, cfg, runner=runner, **extra)
+        return it, mode, repo, plan, res
 
     results = []
     with ThreadPoolExecutor(max_workers=max(1, pace.concurrency)) as ex:
         for fut in as_completed([ex.submit(_one, it) for it in items]):
             results.append(fut.result())
 
-    for it, repo, res in results:
+    for it, mode, repo, plan, res in results:
         slug = it.meta["slug"]
         if res.rate_limited:
             # Calibrate the ceiling from the spend at the 429 BEFORE anchoring resets it.
@@ -103,15 +162,19 @@ def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
             # Per-build capture: keep the shared oracle warm from a benign (allowed) event.
             if res.rate_status:
                 write_oracle(oracle_path, res.rate_status, res.rate_reset_at, "five_hour", now)
-            green = (not res.is_error) and verifier(repo, runner=runner)
-            status = "done" if green else "needs-review"
+            if mode == "document":
+                status, extra, note = _finish_document(it, repo, plan, res, autodoc_ops,
+                                                       runner)
+            else:
+                green = (not res.is_error) and verifier(repo, runner=runner)
+                status = "done" if green else "needs-review"
+                extra, note = {}, {"tests": "green" if green else "red"}
             set_status(it, status)
             append_ledger(ledger_path, {"slug": slug, "status": status,
                                         "cost_usd": res.cost_usd, "duration_s": res.duration_s,
-                                        "at": now.isoformat()})
-            notifier(cfg, "done" if green else "needs-review", slug=slug, repo=str(repo),
-                     tests="green" if green else "red", cost=res.cost_usd,
-                     secs=res.duration_s, runner=runner)
+                                        "at": now.isoformat(), **extra})
+            notifier(cfg, status, slug=slug, repo=str(repo), cost=res.cost_usd,
+                     secs=res.duration_s, runner=runner, **note)
         clear_lock(lock_path, slug)
 
     save_governor_state(gov_path, state)

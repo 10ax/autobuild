@@ -1,0 +1,23 @@
+# Template for config/autodoc-targets.toml (which is gitignored — it names your own repos).
+#
+# The docs lane documents exactly the repos listed here. `bin/seed-autodoc-briefs.py
+# --discover` proposes candidates (repos with commits attributed to Claude that you also
+# authored in), but this file is the authority: a clone of someone else's project carries
+# THEIR Claude commits, and work repos may not want generated docs committed at all.
+#
+# path     — the repo (`~` allowed); must be a git repo
+# slug     — brief + branch + worktree name; kebab-case, unique
+# priority — higher runs first
+# note     — one line of context, handed to the agent inside the brief's Intent
+
+[[target]]
+path = "~/code/my-service"
+slug = "autodoc-my-service"
+priority = 90
+note = "The pricing rules and the retry policy are the interesting part; adapters are noise."
+
+[[target]]
+path = "~/dotfiles"
+slug = "autodoc-dotfiles"
+priority = 50
+note = "Collect+install, not symlink; the install contract is the logic."

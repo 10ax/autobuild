@@ -19,6 +19,43 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(argv[argv.index("--model") + 1], "opus")
         self.assertIn("--add-dir", argv)
 
+    def test_build_mode_argv_names_the_build_playbook(self):
+        argv = build_argv(Path("/b/x.md"), Path("/r/x"), "sonnet",
+                          Config(root="/home/tenax/autobuild"))
+        prompt = argv[argv.index("-p") + 1]
+        self.assertIn("CLAUDE.md", prompt)
+        self.assertNotIn("AUTODOC.md", prompt)
+
+    def test_document_mode_argv_names_the_autodoc_playbook_and_worktree(self):
+        wt = Path("/home/tenax/autobuild/state/worktrees/autodoc-x")
+        argv = build_argv(Path("/b/x.md"), Path("/home/u/repo"), "sonnet",
+                          Config(root="/home/tenax/autobuild"), mode="document", work_dir=wt)
+        prompt = argv[argv.index("-p") + 1]
+        self.assertIn("AUTODOC.md", prompt)
+        self.assertIn("/home/u/repo", prompt)
+        self.assertIn(str(wt), prompt)
+        dirs = [argv[i + 1] for i, a in enumerate(argv) if a == "--add-dir"]
+        self.assertIn(str(wt), dirs)
+        self.assertIn("/home/tenax/autobuild", dirs)
+
+    def test_document_mode_prompt_falls_back_when_the_file_is_absent(self):
+        argv = build_argv(Path("/b/x.md"), Path("/home/u/repo"), "sonnet",
+                          Config(root="/nonexistent-root"), mode="document",
+                          work_dir=Path("/wt"))
+        self.assertIn("AUTODOC.md", argv[argv.index("-p") + 1])
+
+    def test_run_build_runs_the_agent_inside_the_worktree(self):
+        seen = {}
+
+        def runner(argv, **kw):
+            seen.update(kw)
+            return _CP(stdout=json.dumps({"is_error": False, "total_cost_usd": 0.0}))
+
+        run_build(Path("/b/x.md"), Path("/home/u/repo"), "sonnet",
+                  Pace("low", 1, False, "sonnet"), Config(root="/tmp"),
+                  mode="document", work_dir=Path("/tmp/wt"), runner=runner)
+        self.assertEqual(seen.get("cwd"), "/tmp/wt")
+
     def test_parse_success_result(self):
         out = json.dumps({"is_error": False, "total_cost_usd": 0.42,
                           "usage": {"output_tokens": 100}, "session_id": "s1"})
