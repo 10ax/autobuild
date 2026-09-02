@@ -103,6 +103,12 @@ def prepare_worktree(repo: Path, slug: str, worktrees_dir: Path, date: str,
                 else ["worktree", "add", "-b", branch, str(worktree), "HEAD"])
         _git(repo, *args, runner=runner)
 
+    # A worktree left behind by a red run is on the branch of the day it was created, so
+    # believe the worktree rather than today's date — the ledger must name the branch the
+    # commit will actually land on.
+    on = _git(worktree, "rev-parse", "--abbrev-ref", "HEAD", runner=runner).stdout.strip()
+    if on and on != "HEAD":
+        branch = on
     base_sha = _git(worktree, "rev-parse", "HEAD", runner=runner).stdout.strip()
     return AutodocPlan(repo=repo, worktree=worktree, branch=branch, base_sha=base_sha,
                        slug=slug)

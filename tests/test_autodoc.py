@@ -78,6 +78,16 @@ class TestWorktree(unittest.TestCase):
                          _git(repo, "rev-parse", plan.branch).stdout.strip())
         self.assertTrue((again.worktree / "docs" / "CODE-MAP.md").exists())
 
+    def test_reused_worktree_reports_the_branch_it_is_actually_on(self):
+        # A red run leaves its worktree behind. Days later the retry must not claim a new
+        # branch name while committing onto the old one — the ledger would be lying.
+        repo = _repo()
+        first = _plan(repo, date="2026-09-03")
+        again = prepare_worktree(repo, first.slug, first.worktree.parent, "2026-09-10")
+        self.assertEqual(again.branch, "autodoc/2026-09-03")
+        self.assertEqual(_git(again.worktree, "rev-parse", "--abbrev-ref", "HEAD")
+                         .stdout.strip(), again.branch)
+
     def test_prepare_rejects_a_foreign_directory_at_the_worktree_path(self):
         repo = _repo()
         wtdir = Path(tempfile.mkdtemp()) / "worktrees"
