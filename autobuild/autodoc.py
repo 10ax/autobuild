@@ -141,6 +141,23 @@ def _anchors(text: str) -> list[tuple[str, int]]:
     return rows
 
 
+def _did_you_mean(anchor: str, tracked: list[str]) -> str:
+    """Where the file the anchor names actually is.
+
+    The lane's commonest failure is an anchor written as a bare or shortened filename
+    (`Offers.tsx:27`, `run.sh:33`) instead of the path from the repo root, so name the
+    candidate when there is exactly one — an actionable ledger row beats a correct one.
+    """
+    name = anchor.rsplit("/", 1)[-1]
+    hits = [p for p in tracked
+            if p.endswith("/" + anchor) or p.rsplit("/", 1)[-1].endswith(name)]
+    if len(hits) == 1:
+        return f" — did you mean {hits[0]}?"
+    if hits:
+        return f" — {len(hits)} files could match ({', '.join(sorted(hits)[:3])}…)"
+    return ""
+
+
 def _changed(plan: AutodocPlan, runner) -> tuple[list[str], list[str], list[str]]:
     """(tracked changes, tracked deletions, untracked files) in the worktree vs its HEAD."""
     tracked = _git(plan.worktree, "diff", "--name-only", "HEAD", runner=runner).stdout.split("\n")
@@ -196,10 +213,15 @@ def verify_docs(plan: AutodocPlan, runner=subprocess.run) -> list[str]:
         if len(anchors) > MAX_ANCHORS:
             errors.append(f"{CODE_MAP} has {len(anchors)} code anchors, at most "
                           f"{MAX_ANCHORS} keep it synthetic")
+        tracked = None
         for rel, line in anchors:
             target = wt / rel
             if not target.is_file():
-                errors.append(f"dangling anchor in {CODE_MAP}: {rel}:{line} — no such file")
+                if tracked is None:
+                    tracked = _git(wt, "ls-files", runner=runner).stdout.split()
+                hint = _did_you_mean(rel, tracked)
+                errors.append(f"dangling anchor in {CODE_MAP}: {rel}:{line} — no such "
+                              f"file{hint}")
             else:
                 have = len(target.read_bytes().splitlines())
                 if line < 1 or line > have:

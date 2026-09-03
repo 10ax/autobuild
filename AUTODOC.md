@@ -72,10 +72,14 @@ The point of this file is to answer "where does the thinking happen?" in under a
 - **Business logic** means rules, invariants, state machines, scoring/pricing/matching,
   orchestration order, retry and idempotency decisions. Not wiring, not getters, not
   generated code, not config parsing — unless the config *is* the product.
-- Anchor format: `path/from/repo/root.ext:LINE` plus the symbol in backticks. Point at the
-  line where the logic **starts**.
-- **Verify every anchor** before writing it (`sed -n 'LINEp' <file>`). One dangling anchor
-  fails the entire run.
+- Anchor format: the path exactly as `git ls-files` prints it, plus `:LINE`, plus the symbol
+  in backticks. Point at the line where the logic **starts**.
+  `Offers.tsx:27` is **not** an anchor — `src/components/Offers.tsx:27` is. A bare filename,
+  a shortened name (`run.sh` for `cs-diag-run.sh`) or a path relative to anything other than
+  the repo root fails the run.
+- **Verify every anchor** before writing it: `sed -n 'LINEp' <the exact path string you
+  wrote>`. One dangling anchor fails the entire run — this is the single most common way
+  this lane goes red.
 - Hard ceiling: 250 lines.
 
 ## Markers — the rule that keeps you welcome
@@ -86,6 +90,10 @@ Generated prose lives strictly between `<!-- autodoc:begin -->` and `<!-- autodo
 - Existing file → append one block at the end, or rewrite the body of the block that is
   already there. **Never change a byte outside a block.** Do not reflow, reorder,
   translate, correct or "improve" human text. Do not delete anything.
+- The block is the *only* thing you add. Not a heading above it, not a blank line, not a
+  `---` rule to separate it from the prose — those are bytes outside the block and they
+  fail the run. If you want a horizontal rule, it goes **inside** the block, as its first
+  line after the stamp.
 - `AGENTS.md` is hand-curated where it exists: never rewrite it. At most add a block with a
   one-line cross-reference to `CLAUDE.md`.
 - First line inside every block, a stamp: `<!-- autodoc: <short HEAD sha> <YYYY-MM-DD> -->`
@@ -95,10 +103,17 @@ Generated prose lives strictly between `<!-- autodoc:begin -->` and `<!-- autodo
 The daemon runs these same checks and marks the item `needs-review` if any fails:
 
 - the four files exist, are non-empty, and contain no `TBD`/`TODO`/placeholder line;
+- every anchor resolves — run exactly this from the worktree root and expect no output:
+  ```sh
+  grep -oE '[A-Za-z0-9_./-]+\.[A-Za-z][A-Za-z0-9]*:[0-9]+' docs/CODE-MAP.md | sort -u |
+  while IFS=: read -r f l; do
+    { [ -f "$f" ] && [ "$(wc -l < "$f")" -ge "$l" ]; } || echo "BROKEN $f:$l"
+  done
+  ```
 - `git status --porcelain` lists **only** those four files (plus ignorable tool output like
   `.tokensave/`). Anything else you touched: restore it;
 - for each pre-existing file, `git diff HEAD -- <file>` shows additions inside markers only;
-- every anchor resolves; 5–40 anchors; `docs/CODE-MAP.md` ≤ 250 lines;
+- 5–40 anchors; `docs/CODE-MAP.md` ≤ 250 lines;
 - no secret, token, password, private URL or personal datum copied out of the code.
 
 ## Fidelity beats polish

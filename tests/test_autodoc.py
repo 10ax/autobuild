@@ -136,6 +136,27 @@ class TestVerify(unittest.TestCase):
         errs = verify_docs(plan)
         self.assertTrue(any("9999" in e for e in errs), errs)
 
+    def test_dangling_anchor_suggests_the_path_it_probably_meant(self):
+        # The lane's commonest failure: a bare filename instead of a repo-root path. The
+        # error should say where the file actually is, so the ledger row is actionable.
+        plan = _plan(_repo())
+        _write_doc_set(plan.worktree)
+        cm = plan.worktree / "docs" / "CODE-MAP.md"
+        cm.write_text(cm.read_text().replace("src/app.py:2", "app.py:2"))
+        errs = verify_docs(plan)
+        self.assertTrue(any("src/app.py" in e and "app.py:2" in e for e in errs), errs)
+
+    def test_dangling_anchor_suggests_a_truncated_filename(self):
+        plan = _plan(_repo())
+        _write_doc_set(plan.worktree)
+        (plan.worktree / "src" / "cs-diag-run.sh").write_text("a\nb\nc\n")
+        _git(plan.worktree, "add", "-A")
+        _git(plan.worktree, "commit", "-q", "-m", "add script")
+        cm = plan.worktree / "docs" / "CODE-MAP.md"
+        cm.write_text(cm.read_text().replace("src/app.py:2", "run.sh:2"))
+        errs = verify_docs(plan)
+        self.assertTrue(any("cs-diag-run.sh" in e for e in errs), errs)
+
     def test_too_few_anchors_is_red(self):
         plan = _plan(_repo())
         _write_doc_set(plan.worktree, anchors=2)
