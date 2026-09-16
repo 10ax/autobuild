@@ -83,18 +83,27 @@ def _extract_reset(val) -> float | None:
     return None
 
 
-# The docs lane's prompt. `prompts/autodoc.md` is the source of truth when present; this
-# constant keeps the lane working (and unit-testable) if the file is missing.
-_AUTODOC_PROMPT = (
-    "Document the existing repo: {REPO}. Read and write ONLY inside the worktree "
-    "{WORKTREE} (a git worktree of that repo — cd there first). Brief: {BRIEF_PATH}. "
-    "Follow the process in {ROOT}/AUTODOC.md exactly."
-)
+# The worktree lanes' prompts. `prompts/<lane>.md` is the source of truth when present; these
+# constants keep a lane working (and unit-testable) if the file is missing.
+_LANE_PROMPTS = {
+    "document": (
+        "Document the existing repo: {REPO}. Read and write ONLY inside the worktree "
+        "{WORKTREE} (a git worktree of that repo — cd there first). Brief: {BRIEF_PATH}. "
+        "Follow the process in {ROOT}/AUTODOC.md exactly."
+    ),
+    "improve": (
+        "Bring the existing repo {REPO} up to the quality standard in the brief {BRIEF_PATH}. "
+        "Read and write ONLY inside the worktree {WORKTREE} (a git worktree of that repo — "
+        "cd there first). Follow the process in {ROOT}/IMPROVE.md exactly."
+    ),
+}
+_LANE_PROMPT_FILES = {"document": "autodoc.md", "improve": "improve.md"}
 
 
-def _autodoc_prompt(brief_path: Path, repo_root: Path, work_dir: Path, cfg: Config) -> str:
-    template = _AUTODOC_PROMPT
-    f = Path(cfg.root) / "prompts" / "autodoc.md"
+def _lane_prompt(mode: str, brief_path: Path, repo_root: Path, work_dir: Path,
+                 cfg: Config) -> str:
+    template = _LANE_PROMPTS[mode]
+    f = Path(cfg.root) / "prompts" / _LANE_PROMPT_FILES[mode]
     try:
         text = f.read_text().strip()
         if text:
@@ -109,8 +118,8 @@ def _autodoc_prompt(brief_path: Path, repo_root: Path, work_dir: Path, cfg: Conf
 
 def build_argv(brief_path: Path, repo_root: Path, model: str, cfg: Config,
                mode: str = "build", work_dir: Path | None = None) -> list[str]:
-    if mode == "document":
-        prompt = _autodoc_prompt(brief_path, repo_root, Path(work_dir or repo_root), cfg)
+    if mode in _LANE_PROMPTS:
+        prompt = _lane_prompt(mode, brief_path, repo_root, Path(work_dir or repo_root), cfg)
     else:
         prompt = (f"Build backlog item: {brief_path}. Target repo dir: {repo_root}. "
                   f"Follow the process in {Path(cfg.root)}/CLAUDE.md exactly.")

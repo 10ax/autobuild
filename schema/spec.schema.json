@@ -7,12 +7,22 @@
     "spec_version": {"const": "1.0"},
     "slug": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
     "title": {"type": "string", "minLength": 1},
-    "tier": {"enum": ["script", "library", "service"]},
+    "tier": {"enum": ["script", "library", "service", "docs", "quality"]},
     "priority": {"type": "integer"},
     "status": {"enum": ["pending", "building", "done", "needs-review"]},
     "stack": {"type": "string", "default": "typescript"},
     "model": {"enum": ["auto", "sonnet", "opus"], "default": "auto"},
-    "tags": {"type": "array", "items": {"type": "string"}}
+    "tags": {"type": "array", "items": {"type": "string"}},
+    "mode": {"enum": ["build", "document", "improve"], "default": "build"},
+    "repo": {"type": "string", "description": "target repo; required for document and improve"},
+    "allow": {"type": "array", "items": {"type": "string"},
+              "description": "improve: path globs the run may change"},
+    "require": {"type": "array", "items": {"type": "string"},
+                "description": "improve: globs that must each match a non-empty file"},
+    "rewrite": {"type": "array", "items": {"type": "string"},
+                "description": "improve: pre-existing files whose human text may be replaced"},
+    "verify": {"type": "array", "items": {"type": "string"},
+               "description": "improve: shell commands that must exit 0 in the worktree"}
   },
   "additionalProperties": true
 }

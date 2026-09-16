@@ -19,3 +19,7 @@ HANDOFF.md
 # the committed template.
 config/autodoc-targets.toml
 deploy/autodoc-targets.conf
+config/improve-targets.toml
+deploy/improve-targets.conf
+# plugin telemetry written into the session cwd by a Claude Code hook — never ours
+observability/

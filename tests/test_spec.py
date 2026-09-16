@@ -105,3 +105,68 @@ class TestDocumentBrief(unittest.TestCase):
 
     def test_legacy_brief_without_mode_still_valid(self):
         self.assertEqual(validate_spec(parse_spec(VALID_BRIEF), level="brief"), [])
+
+
+IMPROVE_BRIEF = '''+++
+spec_version = "1.0"
+slug = "quality-x"
+title = "Quality: x"
+tier = "quality"
+mode = "improve"
+repo = "{repo}"
+priority = 9
+status = "pending"
+allow = ["README.md", "docs/**", "tests/**"]
+require = ["docs/TROUBLESHOOTING.md"]
+verify = [".venv/bin/pytest -q"]
++++
+## Intent
+Bring x up to standard.
+
+## Acceptance Criteria
+A1. The verify commands pass in the worktree.
+'''
+
+
+class TestImproveBrief(unittest.TestCase):
+    def test_valid_improve_brief_passes(self):
+        doc = parse_spec(IMPROVE_BRIEF.format(repo=_git_repo()))
+        self.assertEqual(validate_spec(doc, level="brief"), [])
+
+    def test_improve_requires_repo(self):
+        text = IMPROVE_BRIEF.format(repo=_git_repo())
+        text = "\n".join(l for l in text.splitlines() if not l.startswith("repo ="))
+        errs = validate_spec(parse_spec(text), level="brief")
+        self.assertTrue(any("repo" in e for e in errs), errs)
+
+    def test_improve_requires_non_empty_allow(self):
+        text = IMPROVE_BRIEF.format(repo=_git_repo()).replace(
+            'allow = ["README.md", "docs/**", "tests/**"]', "allow = []")
+        errs = validate_spec(parse_spec(text), level="brief")
+        self.assertTrue(any("non-empty allow" in e for e in errs), errs)
+        text = "\n".join(l for l in text.splitlines() if not l.startswith("allow ="))
+        errs = validate_spec(parse_spec(text), level="brief")
+        self.assertTrue(any("non-empty allow" in e for e in errs), errs)
+
+    def test_improve_requires_non_empty_verify(self):
+        text = IMPROVE_BRIEF.format(repo=_git_repo()).replace(
+            'verify = [".venv/bin/pytest -q"]', 'verify = ""')
+        errs = validate_spec(parse_spec(text), level="brief")
+        self.assertTrue(any("verify" in e for e in errs), errs)
+
+    def test_improve_lists_must_hold_strings(self):
+        text = IMPROVE_BRIEF.format(repo=_git_repo()).replace(
+            'require = ["docs/TROUBLESHOOTING.md"]', "require = [3]")
+        errs = validate_spec(parse_spec(text), level="brief")
+        self.assertTrue(any("require" in e for e in errs), errs)
+
+    def test_quality_tier_requires_improve_mode(self):
+        bad = VALID_BRIEF.replace('tier = "script"', 'tier = "quality"')
+        errs = validate_spec(parse_spec(bad), level="brief")
+        self.assertTrue(any("quality" in e for e in errs), errs)
+
+    def test_allow_keys_are_only_for_improve(self):
+        bad = DOC_BRIEF.format(repo=_git_repo()).replace(
+            'status = "pending"', 'status = "pending"\nallow = ["docs/**"]')
+        errs = validate_spec(parse_spec(bad), level="brief")
+        self.assertTrue(any("allow" in e for e in errs), errs)

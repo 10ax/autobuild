@@ -373,3 +373,110 @@ class TestDocsLane(unittest.TestCase):
         self.assertEqual(ops.calls, [])
         item = [i for i in scan_backlog(root / "backlog") if i.meta["slug"] == "alpha"][0]
         self.assertEqual(item.meta["status"], "done")
+
+
+# ---- the quality lane ---------------------------------------------------------------
+IMPROVE_BRIEF = '''+++
+spec_version = "1.0"
+slug = "quality-target"
+title = "Quality: target"
+tier = "quality"
+mode = "improve"
+repo = "{repo}"
+priority = 9
+status = "pending"
+allow = ["README.md", "docs/**", "tests/**", ".github/**"]
+require = ["docs/TROUBLESHOOTING.md"]
+rewrite = ["README.md"]
+verify = [".venv/bin/pytest -q"]
++++
+## Intent
+Bring the target repo up to standard.
+
+## Acceptance Criteria
+A1. The verify commands pass in the worktree.
+'''
+
+
+def _improve_root():
+    d = Path(tempfile.mkdtemp())
+    (d / "backlog").mkdir(); (d / "projects").mkdir(); (d / "state").mkdir()
+    target = d / "target"
+    (target / ".git").mkdir(parents=True)
+    (d / "backlog" / "q.md").write_text(IMPROVE_BRIEF.format(repo=target))
+    return d, target
+
+
+class _QOps:
+    """Stand-in for autobuild.improve — records the lane's choreography and the contract
+    the daemon hands it (allow/require/rewrite/verify come from the brief, not the daemon)."""
+
+    def __init__(self, verify_errors=None):
+        self.calls, self.verify_errors = [], list(verify_errors or [])
+
+    def prepare_worktree(self, repo, slug, worktrees_dir, date, runner=None):
+        self.calls.append(("prepare", str(repo), slug, date))
+        return AutodocPlan(repo=Path(repo), worktree=Path(worktrees_dir) / slug,
+                           branch=f"quality/{date}", base_sha="deadbeef", slug=slug)
+
+    def verify_improve(self, plan, allow, verify, require=(), rewrite=(), runner=None):
+        self.calls.append(("verify", plan.slug, list(allow), list(verify), list(require),
+                           list(rewrite)))
+        return list(self.verify_errors)
+
+    def commit_improve(self, plan, message, allow, runner=None, wip=False):
+        self.calls.append(("commit", plan.slug, wip, list(allow), message))
+        return True
+
+    def remove_worktree(self, plan, runner=None):
+        self.calls.append(("remove", plan.slug))
+
+
+class TestQualityLane(unittest.TestCase):
+    def test_improve_item_runs_in_a_quality_worktree_and_hands_the_contract_to_verify(self):
+        root, target = _improve_root()
+        ops, seen, notes = _QOps(), [], []
+        _run(_C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
+             builder=_capture_builder(seen), improve_ops=ops, notes=notes, **_sig(root))
+        self.assertEqual(seen[0]["repo"], target)
+        self.assertEqual(seen[0]["mode"], "improve")
+        self.assertEqual(seen[0]["work_dir"], root / "state" / "worktrees" / "quality-target")
+        self.assertEqual([c[0] for c in ops.calls], ["prepare", "verify", "commit", "remove"])
+        verify = [c for c in ops.calls if c[0] == "verify"][0]
+        self.assertEqual(verify[2], ["README.md", "docs/**", "tests/**", ".github/**"])
+        self.assertEqual(verify[3], [".venv/bin/pytest -q"])
+        self.assertEqual(verify[4], ["docs/TROUBLESHOOTING.md"])
+        self.assertEqual(verify[5], ["README.md"])
+        commit = [c for c in ops.calls if c[0] == "commit"][0]
+        self.assertFalse(commit[2])
+        self.assertEqual(commit[3], ["README.md", "docs/**", "tests/**", ".github/**"])
+        self.assertIn("quality", commit[4])
+        item = [i for i in scan_backlog(root / "backlog")][0]
+        self.assertEqual(item.meta["status"], "done")
+        row = read_ledger(root / "state" / "ledger.jsonl")[0]
+        self.assertEqual(row["mode"], "improve")
+        self.assertEqual(row["branch"], "quality/2026-07-23")
+        self.assertEqual(notes[0][0], "done")
+        self.assertIn("quality/2026-07-23", notes[0][1]["branch"])
+
+    def test_red_verify_keeps_the_worktree_and_commits_wip(self):
+        root, _ = _improve_root()
+        ops, notes = _QOps(verify_errors=["verify failed: `.venv/bin/pytest -q` (exit 1) — boom"]), []
+        _run(_C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
+             builder=_capture_builder([]), improve_ops=ops, notes=notes, **_sig(root))
+        self.assertEqual([c[0] for c in ops.calls], ["prepare", "verify", "commit"])
+        self.assertTrue([c for c in ops.calls if c[0] == "commit"][0][2])
+        item = [i for i in scan_backlog(root / "backlog")][0]
+        self.assertEqual(item.meta["status"], "needs-review")
+        self.assertEqual(notes[0][0], "needs-review")
+        self.assertIn("pytest", notes[0][1]["reason"])
+        self.assertIn("worktrees/quality-target", notes[0][1]["worktree"])
+
+    def test_agent_error_is_needs_review_without_running_verify(self):
+        root, _ = _improve_root()
+        ops = _QOps()
+        _run(_C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
+             builder=_capture_builder([], is_error=True), improve_ops=ops, **_sig(root))
+        self.assertNotIn("verify", [c[0] for c in ops.calls])
+        item = [i for i in scan_backlog(root / "backlog")][0]
+        self.assertEqual(item.meta["status"], "needs-review")

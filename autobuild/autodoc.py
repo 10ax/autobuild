@@ -82,12 +82,15 @@ def _commit_env() -> dict:
 
 
 def prepare_worktree(repo: Path, slug: str, worktrees_dir: Path, date: str,
-                     runner=subprocess.run) -> AutodocPlan:
-    """Put a worktree for `repo` on branch `autodoc/<date>`, creating or reusing both."""
+                     runner=subprocess.run, prefix: str = "autodoc") -> AutodocPlan:
+    """Put a worktree for `repo` on branch `<prefix>/<date>`, creating or reusing both.
+
+    `prefix` names the lane: `autodoc/` for the docs lane, `quality/` for the improve lane.
+    """
     repo, worktrees_dir = Path(repo).expanduser().resolve(), Path(worktrees_dir)
     if not (repo / ".git").exists():
         raise AutodocError(f"not a git repo: {repo}")
-    branch = f"autodoc/{date}"
+    branch = f"{prefix}/{date}"
     worktree = worktrees_dir / slug
     worktrees_dir.mkdir(parents=True, exist_ok=True)
 

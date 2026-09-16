@@ -4,12 +4,18 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-TIERS = {"script", "library", "service", "docs"}
+TIERS = {"script", "library", "service", "docs", "quality"}
 STATUSES = {"pending", "building", "done", "needs-review"}
 MODELS = {"auto", "sonnet", "opus"}
 # Lanes: "build" creates a new project under projects/<slug>; "document" writes a doc set
-# into an existing repo named by the brief's `repo` key (see AUTODOC.md).
-MODES = {"build", "document"}
+# into an existing repo named by the brief's `repo` key (see AUTODOC.md); "improve" brings an
+# existing repo up to a quality standard — tests, CI, docs, skills — inside the paths the
+# brief allows, gated by the verify commands the brief names (see IMPROVE.md).
+MODES = {"build", "document", "improve"}
+REPO_MODES = {"document", "improve"}
+# improve-only front-matter lists: writable path globs, globs that must match ≥1 file,
+# pre-existing files whose human text may be replaced, and the shell commands that must pass.
+IMPROVE_LISTS = ("allow", "require", "rewrite", "verify")
 SPEC_SECTIONS = ["Intent", "Ubiquitous Language", "Domain Model", "Requirements",
                  "Interfaces", "Acceptance Criteria", "Non-Goals", "Constraints"]
 BRIEF_SECTIONS = ["Intent", "Acceptance Criteria"]
@@ -69,9 +75,9 @@ def validate_spec(doc: SpecDoc, level: str = "spec") -> list[str]:
     if mode not in MODES:
         errors.append(f"mode must be one of {sorted(MODES)}")
     repo = meta.get("repo")
-    if mode == "document":
+    if mode in REPO_MODES:
         if not repo:
-            errors.append("mode=document requires a repo path in the front-matter")
+            errors.append(f"mode={mode} requires a repo path in the front-matter")
         else:
             target = Path(str(repo)).expanduser()
             if not target.is_dir():
@@ -79,9 +85,23 @@ def validate_spec(doc: SpecDoc, level: str = "spec") -> list[str]:
             elif not (target / ".git").exists():
                 errors.append(f"repo is not a git repo: {target}")
     elif repo is not None:
-        errors.append("repo is only allowed with mode=document")
+        errors.append("repo is only used with mode=document or mode=improve")
     if meta.get("tier") == "docs" and mode != "document":
         errors.append('tier "docs" requires mode = "document"')
+    if meta.get("tier") == "quality" and mode != "improve":
+        errors.append('tier "quality" requires mode = "improve"')
+    for k in IMPROVE_LISTS:
+        v = meta.get(k)
+        if v is None:
+            continue
+        if mode != "improve":
+            errors.append(f"{k} is only used with mode=improve")
+        elif not isinstance(v, list) or not all(isinstance(x, str) and x.strip() for x in v):
+            errors.append(f"{k} must be a list of non-empty strings")
+    if mode == "improve":
+        for k in ("allow", "verify"):
+            if not meta.get(k):
+                errors.append(f"mode=improve requires a non-empty {k} list")
     required = BRIEF_SECTIONS if level == "brief" else SPEC_SECTIONS
     for s in required:
         v = doc.sections.get(s, "").strip()

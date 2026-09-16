@@ -1,0 +1,37 @@
+# Template for config/improve-targets.toml (which is gitignored — it names your own repos).
+#
+# The quality lane writes tests, CI, docs and skills into repos that already exist. There is
+# no discovery here, unlike the docs lane: every target is written by hand, because each one
+# must state the contract the daemon enforces. If you cannot say which paths a repo's quality
+# run may touch, the repo is not ready to be in this list.
+#
+# path     — the repo (`~` allowed); must be a git repo
+# slug     — brief + branch + worktree name; kebab-case, unique
+# priority — higher runs first
+# note     — one paragraph of context, handed to the agent inside the brief's Intent
+# traps    — the things this repo already taught you the hard way; each one must end up in
+#            docs/TROUBLESHOOTING.md. This is the highest-value field in the file.
+# allow    — path globs the run may change. Anything outside fails the whole run, so leave
+#            hand-curated files (AGENTS.md, HARNESS.md) out to make them untouchable.
+# require  — globs that must each match a non-empty, non-gitignored file when the run ends
+# rewrite  — pre-existing files whose human text may be replaced wholesale (empty or
+#            boilerplate READMEs); everything else keeps its prose byte for byte
+# verify   — shell commands the DAEMON runs in the worktree; all must exit 0. Make the first
+#            one the toolchain setup so the check is self-contained and repeatable.
+
+[[target]]
+path = "~/code/my-service"
+slug = "quality-my-service"
+priority = 90
+note = "A service whose pricing rules are the product; adapters are noise."
+traps = [
+  "`npm ci` fails unless the lockfile was refreshed after editing package.json",
+  "the retry budget is per-host, not per-request — a global counter was the 2026-03 outage",
+]
+allow = ["README.md", "CLAUDE.md", "docs/**", ".claude/skills/**", ".github/**",
+         "tests/**", "src/**", "package.json", "package-lock.json", "vitest.config.ts",
+         ".gitignore"]
+require = ["README.md", "CLAUDE.md", "docs/TROUBLESHOOTING.md", ".github/workflows/ci.yml",
+           ".github/dependabot.yml", ".claude/skills/*/SKILL.md", "tests/**/*.test.ts"]
+rewrite = []
+verify = ["npm ci --ignore-scripts", "npx tsc --noEmit", "npx vitest run"]

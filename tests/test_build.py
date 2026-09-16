@@ -38,6 +38,24 @@ class TestBuild(unittest.TestCase):
         self.assertIn(str(wt), dirs)
         self.assertIn("/home/tenax/autobuild", dirs)
 
+    def test_improve_mode_argv_names_the_improve_playbook_and_worktree(self):
+        wt = Path("/home/tenax/autobuild/state/worktrees/quality-x")
+        argv = build_argv(Path("/b/x.md"), Path("/home/u/repo"), "opus",
+                          Config(root="/home/tenax/autobuild"), mode="improve", work_dir=wt)
+        prompt = argv[argv.index("-p") + 1]
+        self.assertIn("IMPROVE.md", prompt)
+        self.assertNotIn("AUTODOC.md", prompt)
+        self.assertIn("/home/u/repo", prompt)
+        self.assertIn(str(wt), prompt)
+        self.assertIn("/b/x.md", prompt)
+        dirs = [argv[i + 1] for i, a in enumerate(argv) if a == "--add-dir"]
+        self.assertIn(str(wt), dirs)
+
+    def test_improve_mode_prompt_falls_back_when_the_file_is_absent(self):
+        argv = build_argv(Path("/b/x.md"), Path("/home/u/repo"), "opus",
+                          Config(root="/nonexistent-root"), mode="improve", work_dir=Path("/wt"))
+        self.assertIn("IMPROVE.md", argv[argv.index("-p") + 1])
+
     def test_document_mode_prompt_falls_back_when_the_file_is_absent(self):
         argv = build_argv(Path("/b/x.md"), Path("/home/u/repo"), "sonnet",
                           Config(root="/nonexistent-root"), mode="document",

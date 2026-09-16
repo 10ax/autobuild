@@ -15,6 +15,7 @@ from autobuild.governor import (Pace, compute_pace, record_spend, update_ceiling
 from autobuild.backlog import scan_backlog, select_pending, set_status, add_lock, clear_lock, read_lock
 from autobuild.build import run_build, verify_repo, BuildResult
 from autobuild import autodoc as _autodoc
+from autobuild import improve as _improve
 from autobuild.autodoc import AutodocError
 from autobuild.notify import notify
 from autobuild.spec import validate_spec
@@ -24,12 +25,16 @@ from autobuild.usage import read_signal, write_oracle
 # the standalone oracle timer AND this daemon's own builds write the oracle. Freshest wins.
 _CLAUDE_DIR = Path.home() / ".claude"
 
+# Lanes that work on a repo which already exists: the daemon prepares a throwaway worktree,
+# the agent writes only inside it, and the daemon owns every git write.
+_WORKTREE_LANES = ("document", "improve")
+
 
 def _target(cfg: Config, item) -> tuple[str, Path]:
     """The lane an item runs in and the repo it works on. `build` items own a fresh dir
-    under projects/; `document` items point at a repo that already exists."""
+    under projects/; `document` and `improve` items point at a repo that already exists."""
     mode = item.meta.get("mode", "build")
-    if mode == "document":
+    if mode in _WORKTREE_LANES:
         return mode, Path(str(item.meta.get("repo", ""))).expanduser()
     return mode, cfg.root / "projects" / item.meta["slug"]
 
@@ -40,6 +45,20 @@ def _commit_message(item, plan, wip: bool = False) -> str:
             f"Written by autobuild's autodoc lane from {item.path.name}, "
             f"on top of {plan.base_sha[:8]}.\n\n"
             "Co-Authored-By: Claude <noreply@anthropic.com>")
+
+
+def _quality_commit_message(item, plan, wip: bool = False) -> str:
+    head = "chore(quality) WIP:" if wip else "chore(quality):"
+    return (f"{head} tests, CI, docs and skills\n\n"
+            f"Written by autobuild's quality lane from {item.path.name}, "
+            f"on top of {plan.base_sha[:8]}.\n\n"
+            "Co-Authored-By: Claude <noreply@anthropic.com>")
+
+
+def _contract(item) -> dict:
+    """The improve lane's contract, as the brief states it: which paths may change, which
+    files must exist, whose prose may be replaced, and what has to pass."""
+    return {k: list(item.meta.get(k, []) or []) for k in ("allow", "verify", "require", "rewrite")}
 
 
 def _finish_document(item, repo: Path, plan, res: BuildResult, autodoc_ops,
@@ -68,10 +87,40 @@ def _finish_document(item, repo: Path, plan, res: BuildResult, autodoc_ops,
                                    "reason": reason}
 
 
+def _finish_improve(item, repo: Path, plan, res: BuildResult, improve_ops,
+                    runner) -> tuple[str, dict, dict]:
+    """Verify the quality run against the brief's contract, commit what it was allowed to
+    change, and tear the worktree down when green. Same shape as `_finish_document`: a red
+    run keeps its worktree so a human can see what the agent actually did."""
+    if plan is None:
+        reason = str((res.raw or {}).get("autodoc_error", "worktree preparation failed"))
+        return "needs-review", {"mode": "improve", "repo": str(repo)}, {"reason": reason}
+
+    contract = _contract(item)
+    errs = ([] if not res.is_error
+            else ["agent run failed before the contract could be verified"])
+    if not errs:
+        errs = list(improve_ops.verify_improve(plan, runner=runner, **contract))
+    extra = {"mode": "improve", "repo": str(repo), "branch": plan.branch}
+    allow = contract["allow"]
+    if (not res.is_error) and not errs:
+        improve_ops.commit_improve(plan, _quality_commit_message(item, plan), allow=allow,
+                                   runner=runner)
+        improve_ops.remove_worktree(plan, runner=runner)
+        return "done", extra, {"branch": plan.branch}
+
+    improve_ops.commit_improve(plan, _quality_commit_message(item, plan, wip=True),
+                               allow=allow, runner=runner, wip=True)
+    reason = "; ".join(errs[:3]) or str((res.raw or {}).get("error", "agent run failed"))
+    extra |= {"worktree": str(plan.worktree), "reason": reason}
+    return "needs-review", extra, {"branch": plan.branch, "worktree": str(plan.worktree),
+                                   "reason": reason}
+
+
 def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
              runner=subprocess.run, verifier=verify_repo, builder=run_build,
              oracle_path=None, snapshot_path=None, notifier=notify,
-             autodoc_ops=_autodoc) -> dict:
+             autodoc_ops=_autodoc, improve_ops=_improve) -> dict:
     state_dir = Path(state_dir)
     lock_path = state_dir / "current.lock"
     ledger_path = state_dir / "ledger.jsonl"
@@ -122,11 +171,12 @@ def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
         entry = {"slug": slug, "repo": str(repo), "started_at": now.isoformat(),
                  "model": pace.model, "mode": mode}
         plan = None
-        if mode == "document":
-            # The daemon owns every git write in this lane; the agent only writes files.
+        if mode in _WORKTREE_LANES:
+            # The daemon owns every git write in these lanes; the agent only writes files.
+            ops = autodoc_ops if mode == "document" else improve_ops
             try:
-                plan = autodoc_ops.prepare_worktree(repo, slug, state_dir / "worktrees",
-                                                    now.strftime("%Y-%m-%d"), runner=runner)
+                plan = ops.prepare_worktree(repo, slug, state_dir / "worktrees",
+                                            now.strftime("%Y-%m-%d"), runner=runner)
             except AutodocError as e:
                 add_lock(lock_path, entry)
                 return it, mode, repo, None, BuildResult(
@@ -165,6 +215,9 @@ def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
             if mode == "document":
                 status, extra, note = _finish_document(it, repo, plan, res, autodoc_ops,
                                                        runner)
+            elif mode == "improve":
+                status, extra, note = _finish_improve(it, repo, plan, res, improve_ops,
+                                                      runner)
             else:
                 green = (not res.is_error) and verifier(repo, runner=runner)
                 status = "done" if green else "needs-review"
