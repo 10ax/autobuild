@@ -3,8 +3,7 @@
 set -uo pipefail
 DATE="${1:-$(date +%F)}"
 for R in ~/Personal/code/telegram-photo-vault ~/Personal/code/bash \
-         ~/Personal/code/web/skv-web ~/Personal/code/web/10ax.github.io \
-         ~/Personal/code/python/crawler ~/Personal/code/typescript/task-scheduler-bot; do
+         ~/Personal/code/web/skv-web ~/Personal/code/web/10ax.github.io; do
   B="quality/$DATE"
   git -C "$R" rev-parse --verify --quiet "$B" >/dev/null || continue
   D=$(git -C "$R" rev-parse --abbrev-ref HEAD)
