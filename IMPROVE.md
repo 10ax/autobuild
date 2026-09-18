@@ -164,6 +164,15 @@ Generated prose lives strictly between `<!-- autodoc:begin -->` and `<!-- autodo
 - First line inside every block, a stamp: `<!-- autodoc: <short HEAD sha> <YYYY-MM-DD> -->`
 - Non-Markdown files you create (workflows, configs, tests) carry no markers.
 
+## The verify commands run again, after you
+
+The daemon re-runs every command in the brief's `verify` list itself, in the same worktree,
+*after* you have finished — your `.venv`, your `node_modules` and your caches are all still
+there. So every one of those commands has to be idempotent on a worktree you have already
+worked in. `uv venv` without `--clear` refuses to overwrite an existing environment and the
+whole run goes red on a repo whose tests actually pass. If a brief hands you a command that
+cannot run twice, say so in your final message rather than working around it.
+
 ## Self-check before you finish
 
 The daemon runs these same checks and marks the item `needs-review` if any fails:
