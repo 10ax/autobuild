@@ -21,7 +21,7 @@ weekly_target_usd = 0.0
 # Live weekly-usage guard (reads the statusline 7d %). Keeps a reserve for your own daytime
 # work and throttles the daemon's daily draw. Needs a fresh 7d % to gate overnight builds.
 weekly_guard_enabled = true
-weekly_ceiling_pct = 50.0   # pause when weekly usage reaches this % (reserve the rest for you)
+weekly_ceiling_pct = 75.0   # RAISED 2026-09-17 for tonight only (was 50.0) — the 7d resets Sat 10:00
 daily_cap_pct = 10.0        # add at most this many weekly-% points per calendar day
 # Use-it-or-lose-it: within this many hours of the weekly reset the reserve would just expire,
 # so spend it — ceiling + daily cap suspended (quiet hours and the 5h limit still apply). 0 = off.

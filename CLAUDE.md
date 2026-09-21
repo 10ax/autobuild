@@ -21,9 +21,24 @@ for code research. After scaffolding, keep the graph current with `tokensave syn
    canonical format (front-matter + sections: Intent, Ubiquitous Language, Domain
    Model, Requirements, Interfaces, Acceptance Criteria, Non-Goals, Constraints).
    No `TBD`/placeholder sections. This is the contract for everything below.
-2. **Scaffold** the repo at the target dir: `npm init -y`, add `typescript`,
+2. **Scaffold** the repo at the target dir: `pnpm init`, add `typescript`,
    `tsx`/`vitest` (or `node --test`), `tsconfig.json` with `strict: true`,
-   `git init`, initial commit. Then:
+   `git init`, initial commit. pnpm, never npm/npx/yarn — one lockfile per repo.
+   Two things pnpm needs that npm did not:
+   - Pin the manager: `"packageManager": "pnpm@11.24.0"` in `package.json`, so
+     CI and every machine agree without a second source of truth.
+   - Allow the builds you actually need, in `pnpm-workspace.yaml` (pnpm 11 no
+     longer reads a `pnpm` key in `package.json`). pnpm blocks dependency build
+     scripts by default and the install still SUCCEEDS, so the damage surfaces
+     later and somewhere else — vitest with no bundler, a missing native
+     binding. Anything using vitest needs at least:
+     ```yaml
+     allowBuilds:
+       esbuild: true
+     ```
+     When an install ends in `ERR_PNPM_IGNORED_BUILDS`, add the packages it
+     names there instead of ignoring the line.
+   Then:
    ```
    tokensave init
    tokensave install
@@ -39,8 +54,10 @@ for code research. After scaffolding, keep the graph current with `tokensave syn
 4. **TDD implement** (use the test-driven-development skill): for each Acceptance
    Criterion `A1..An`, write a failing test → minimal code → pass → commit. Run
    `tokensave sync` after each batch.
-5. **Verify** (use the verification-before-completion skill): `npm test` and
-   `npx tsc --noEmit` must BOTH pass. Do not claim success without green output.
+5. **Verify** (use the verification-before-completion skill): `pnpm test` and
+   `pnpm exec tsc --noEmit` must BOTH pass. Do not claim success without green
+   output. The controller re-runs these itself and reads the manager off the
+   lockfile, so a pnpm project must carry `pnpm-lock.yaml` in its first commit.
 6. **Progress + finish.** Keep `PROGRESS.md` updated (what's done, what's next) so
    a killed run resumes cleanly. If a `$PACE`/rate-limit interruption stopped you
    mid-build, on the next run continue from `PROGRESS.md`.

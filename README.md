@@ -8,7 +8,8 @@ Europe/Rome the runner writes a spec, TDD-builds a TypeScript repo under
 A brief's `mode` picks the lane:
 
 - `build` (default) — the above: write a spec, TDD-build a new project under `projects/<slug>/`,
-  verify with `npm test` + `tsc`. Playbook: `CLAUDE.md`.
+  verify with `pnpm test` + `tsc` (the manager is read off the repo's lockfile, so
+  the six projects built before the switch still verify with npm). Playbook: `CLAUDE.md`.
 - `document` — write a doc set (README, CLAUDE.md, `docs/WORKING-ON-THIS.md`,
   `docs/CODE-MAP.md`) into a repo that **already exists**, named by the brief's `repo` key.
   Playbook: `AUTODOC.md`.
@@ -85,7 +86,7 @@ and the optional weekly reserve (`weekly_reserve_enabled` + `weekly_target_usd`)
   `deploy/autobuild.service` (`ProtectSystem=strict`, `NoNewPrivileges=yes`,
   `PrivateTmp=yes`, etc.), which makes the OS enforce a read-only filesystem
   outside `ReadWritePaths`. On first supervised run, confirm `claude` can
-  authenticate and that `npm install`/`tsc` work end-to-end; if a tool needs to
+  authenticate and that `pnpm install`/`tsc` work end-to-end; if a tool needs to
   write to a path not already in `ReadWritePaths`, add it there. Note the
   `claude` CLI writes `~/.claude.json` (a file *beside* the `~/.claude/`
   directory) plus a `.claude.json.bak` — both are already listed, but if a
@@ -99,5 +100,5 @@ and the optional weekly reserve (`weekly_reserve_enabled` + `weekly_target_usd`)
   host's default `python3` is older or lives elsewhere.
 - **PATH.** The unit's `Environment=PATH=...` currently lists
   `~/.local/bin:~/.cargo/bin:/usr/local/bin:/usr/bin:/bin`. Make sure
-  `node`/`npm`/`npx` resolve on that `PATH` — add the node bin dir (e.g. an
+  `node`/`pnpm` resolve on that `PATH` — add the node bin dir (e.g. an
   nvm install path) if the build/verify steps can't find them.

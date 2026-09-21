@@ -250,8 +250,32 @@ def run_build(brief_path: Path, repo_root: Path, model: str, pace: Pace,
     return result
 
 
+# The verify commands, per package manager. pnpm is what the playbook scaffolds with
+# now; npm stays because six projects were built before the switch and still carry a
+# package-lock.json, and verifying one of those with pnpm fails on a lockfile it will
+# not read — an infrastructure failure reported as a broken build.
+_VERIFY_CMDS = {
+    "pnpm": (["pnpm", "test"], ["pnpm", "exec", "tsc", "--noEmit"]),
+    "npm": (["npm", "test", "--silent"], ["npx", "tsc", "--noEmit"]),
+}
+
+
+def package_manager(repo_root: Path) -> str:
+    """Which package manager this repo speaks, read off its lockfile.
+
+    pnpm wins when both are present: that is a migration in progress, and the pnpm
+    lockfile is the newer intent. No lockfile at all means a build died before its
+    first install, and pnpm is what the next one will produce.
+    """
+    if (repo_root / "pnpm-lock.yaml").exists():
+        return "pnpm"
+    if (repo_root / "package-lock.json").exists():
+        return "npm"
+    return "pnpm"
+
+
 def verify_repo(repo_root: Path, runner=subprocess.run, timeout: int = 600) -> bool:
-    for cmd in (["npm", "test", "--silent"], ["npx", "tsc", "--noEmit"]):
+    for cmd in _VERIFY_CMDS[package_manager(repo_root)]:
         try:
             cp = runner(cmd, cwd=str(repo_root), capture_output=True, text=True, timeout=timeout)
         except (OSError, subprocess.TimeoutExpired):

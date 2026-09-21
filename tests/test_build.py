@@ -1,4 +1,4 @@
-import json, subprocess, unittest
+import json, subprocess, tempfile, unittest
 from pathlib import Path
 from autobuild.config import Config
 from autobuild.governor import Pace
@@ -171,6 +171,49 @@ class TestBuild(unittest.TestCase):
         def hang(*a, **k):
             raise subprocess.TimeoutExpired(cmd="npm", timeout=1)
         self.assertFalse(verify_repo(Path("/r/x"), runner=hang))
+
+    # --- which package manager verify_repo speaks -------------------------------
+    # The build lane now scaffolds with pnpm, but six projects built before that
+    # still carry package-lock.json. Verifying those with pnpm would fail on a
+    # lockfile it cannot read, so the manager is read off the repo, not hardcoded.
+
+    def _verify_cmds(self, tmp: Path) -> list[list[str]]:
+        seen = []
+        def spy(argv, **k):
+            seen.append(list(argv))
+            return _CP(returncode=0)
+        verify_repo(tmp, runner=spy)
+        return seen
+
+    def test_verify_repo_uses_pnpm_when_the_repo_has_a_pnpm_lockfile(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            (tmp / "pnpm-lock.yaml").write_text("lockfileVersion: '11.0'\n")
+            cmds = self._verify_cmds(tmp)
+        self.assertEqual(cmds, [["pnpm", "test"], ["pnpm", "exec", "tsc", "--noEmit"]])
+
+    def test_verify_repo_still_uses_npm_for_a_repo_built_before_the_switch(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            (tmp / "package-lock.json").write_text("{}")
+            cmds = self._verify_cmds(tmp)
+        self.assertEqual(cmds, [["npm", "test", "--silent"], ["npx", "tsc", "--noEmit"]])
+
+    def test_verify_repo_defaults_to_pnpm_when_no_lockfile_exists(self):
+        # A build killed before its first install leaves no lockfile. pnpm is what
+        # the playbook scaffolds with, so that is the right guess.
+        with tempfile.TemporaryDirectory() as d:
+            cmds = self._verify_cmds(Path(d))
+        self.assertEqual(cmds[0][0], "pnpm")
+
+    def test_verify_repo_prefers_pnpm_when_both_lockfiles_are_present(self):
+        # A half-finished migration: pnpm-lock.yaml is the newer intent.
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            (tmp / "package-lock.json").write_text("{}")
+            (tmp / "pnpm-lock.yaml").write_text("lockfileVersion: '11.0'\n")
+            cmds = self._verify_cmds(tmp)
+        self.assertEqual(cmds[0][0], "pnpm")
 
     # --- api_error_status: the structured limit signal from headless `claude -p` ---
     def test_parse_detects_rate_limit_via_api_error_status_dict(self):
