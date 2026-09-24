@@ -10,10 +10,16 @@ MODELS = {"auto", "sonnet", "opus"}
 # Lanes: "build" creates a new project under projects/<slug>; "document" writes a doc set
 # into an existing repo named by the brief's `repo` key (see AUTODOC.md); "improve" brings an
 # existing repo up to a quality standard — tests, CI, docs, skills — inside the paths the
-# brief allows, gated by the verify commands the brief names (see IMPROVE.md).
-MODES = {"build", "document", "improve"}
-REPO_MODES = {"document", "improve"}
-# improve-only front-matter lists: writable path globs, globs that must match ≥1 file,
+# brief allows, gated by the verify commands the brief names (see IMPROVE.md); "implement"
+# carries out an implementation plan that already exists in the repo, and is the only lane
+# allowed to change what the code does (see IMPLEMENT.md).
+MODES = {"build", "document", "improve", "implement"}
+REPO_MODES = {"document", "improve", "implement"}
+# The contract lanes. Both state their own guarantee in the brief's front-matter rather than
+# in a fixed file list, and both are gated by it; what differs is what they may do inside
+# those lines, not how the lines are drawn.
+CONTRACT_MODES = {"improve", "implement"}
+# Contract front-matter lists: writable path globs, globs that must match ≥1 file,
 # pre-existing files whose human text may be replaced, and the shell commands that must pass.
 IMPROVE_LISTS = ("allow", "require", "rewrite", "verify")
 SPEC_SECTIONS = ["Intent", "Ubiquitous Language", "Domain Model", "Requirements",
@@ -85,7 +91,22 @@ def validate_spec(doc: SpecDoc, level: str = "spec") -> list[str]:
             elif not (target / ".git").exists():
                 errors.append(f"repo is not a git repo: {target}")
     elif repo is not None:
-        errors.append("repo is only used with mode=document or mode=improve")
+        errors.append(f"repo is only used with mode in {sorted(REPO_MODES)}")
+    # The implement lane carries out a plan that already exists in the repo, so the plan is
+    # the one thing worth resolving here: a mistyped path costs a whole overnight window,
+    # and the run would otherwise discover it with no human awake to fix it.
+    plan_rel = meta.get("plan")
+    if mode == "implement":
+        if not plan_rel:
+            errors.append("mode=implement requires a plan path in the front-matter")
+        elif repo:
+            plan_path = Path(str(repo)).expanduser() / str(plan_rel)
+            if not plan_path.is_file():
+                errors.append(f"plan does not exist in the repo: {plan_rel}")
+            elif not plan_path.read_text(errors="replace").strip():
+                errors.append(f"plan is empty: {plan_rel}")
+    elif plan_rel is not None:
+        errors.append("plan is only used with mode=implement")
     if meta.get("tier") == "docs" and mode != "document":
         errors.append('tier "docs" requires mode = "document"')
     if meta.get("tier") == "quality" and mode != "improve":
@@ -94,14 +115,14 @@ def validate_spec(doc: SpecDoc, level: str = "spec") -> list[str]:
         v = meta.get(k)
         if v is None:
             continue
-        if mode != "improve":
-            errors.append(f"{k} is only used with mode=improve")
+        if mode not in CONTRACT_MODES:
+            errors.append(f"{k} is only used with mode in {sorted(CONTRACT_MODES)}")
         elif not isinstance(v, list) or not all(isinstance(x, str) and x.strip() for x in v):
             errors.append(f"{k} must be a list of non-empty strings")
-    if mode == "improve":
+    if mode in CONTRACT_MODES:
         for k in ("allow", "verify"):
             if not meta.get(k):
-                errors.append(f"mode=improve requires a non-empty {k} list")
+                errors.append(f"mode={mode} requires a non-empty {k} list")
     required = BRIEF_SECTIONS if level == "brief" else SPEC_SECTIONS
     for s in required:
         v = doc.sections.get(s, "").strip()

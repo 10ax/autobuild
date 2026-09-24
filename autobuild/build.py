@@ -96,8 +96,14 @@ _LANE_PROMPTS = {
         "Read and write ONLY inside the worktree {WORKTREE} (a git worktree of that repo — "
         "cd there first). Follow the process in {ROOT}/IMPROVE.md exactly."
     ),
+    "implement": (
+        "Carry out the implementation plan named by the brief {BRIEF_PATH}, in the existing "
+        "repo {REPO}. Read and write ONLY inside the worktree {WORKTREE} (a git worktree of "
+        "that repo — cd there first). Follow the process in {ROOT}/IMPLEMENT.md exactly."
+    ),
 }
-_LANE_PROMPT_FILES = {"document": "autodoc.md", "improve": "improve.md"}
+_LANE_PROMPT_FILES = {"document": "autodoc.md", "improve": "improve.md",
+                      "implement": "implement.md"}
 
 
 def _lane_prompt(mode: str, brief_path: Path, repo_root: Path, work_dir: Path,

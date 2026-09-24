@@ -4,7 +4,7 @@ Autonomous overnight builder: seed a brief in `backlog/`, and outside 08:00–19
 Europe/Rome the runner writes a spec, TDD-builds a TypeScript repo under
 `projects/<slug>/`, verifies it, commits, and pings telegram.
 
-## Three lanes
+## Four lanes
 A brief's `mode` picks the lane:
 
 - `build` (default) — the above: write a spec, TDD-build a new project under `projects/<slug>/`,
@@ -15,6 +15,9 @@ A brief's `mode` picks the lane:
   Playbook: `AUTODOC.md`.
 - `improve` — give a repo that already exists a test suite, a CI workflow, an operating guide
   and a couple of skills. Playbook: `IMPROVE.md`.
+- `implement` — carry out an implementation plan that already exists in a repo, named by the
+  brief's `plan` key. The only lane allowed to change what the code does. Playbook:
+  `IMPLEMENT.md`.
 
 The docs lane never touches your checkout: the agent writes in a `git worktree` under
 `state/worktrees/<slug>`, and the daemon commits only the doc set on a branch
@@ -65,6 +68,38 @@ Because this lane builds each repo's toolchain inside the worktree, the sandbox 
 and pnpm caches writable as well as the repos — `--systemd` emits both. One trap worth
 knowing: a `uv venv` has **no pip inside it**, so install with
 `VIRTUAL_ENV=.venv uv pip install -r ...`, never `.venv/bin/python -m pip`.
+
+## The implement lane
+
+The quality lane's rule is "behaviour must not change". This one exists for the opposite
+case: a plan that a human wrote and approved, sitting in the repo, waiting to be carried out.
+The brief adds one key — `plan`, a repo-relative path — and `spec.py` resolves it at
+validation time, because a mistyped path should cost a second at seeding, not a whole
+overnight window.
+
+It reuses the quality lane's gate **unchanged**: same containment, same `require`, same
+frozen human prose, same "the daemon runs your verify commands itself". Shipping a feature
+does legitimately touch documentation, so a brief names those specific files in `rewrite` —
+narrow, explicit, and visible in review — rather than the lane switching the check off.
+
+The agent does not design. `IMPLEMENT.md` tells it the plan is the authority, to work the
+tasks in order, to run the verify commands after **every** task, and to stop at the first
+one it cannot finish green: seven tasks done and verified is a good night, nine half-done is
+a mess someone has to unpick. It also tells it to skip the plan's own `git commit` steps —
+plans are written for humans, and in this lane the daemon owns git.
+
+Branches land on `implement/<date>` and are never pushed. Review with
+`git -C <repo> diff <default-branch>..implement/<date>`.
+
+```toml
+mode = "implement"
+repo = "~/Personal/code/<repo>"
+plan = "docs/superpowers/plans/<date>-<feature>.md"
+allow   = [...]   # what the run may change
+require = [...]   # what must exist when it ends
+rewrite = [...]   # the docs this feature is allowed to edit, named one by one
+verify  = [...]   # what the daemon runs itself
+```
 
 ## Seed work
 Copy `templates/brief.template.md` into `backlog/NNNN-slug.md`, fill Intent +

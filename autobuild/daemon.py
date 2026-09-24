@@ -16,6 +16,7 @@ from autobuild.backlog import scan_backlog, select_pending, set_status, add_lock
 from autobuild.build import run_build, verify_repo, BuildResult
 from autobuild import autodoc as _autodoc
 from autobuild import improve as _improve
+from autobuild import implement as _implement
 from autobuild.autodoc import AutodocError
 from autobuild.notify import notify
 from autobuild.spec import validate_spec
@@ -27,7 +28,7 @@ _CLAUDE_DIR = Path.home() / ".claude"
 
 # Lanes that work on a repo which already exists: the daemon prepares a throwaway worktree,
 # the agent writes only inside it, and the daemon owns every git write.
-_WORKTREE_LANES = ("document", "improve")
+_WORKTREE_LANES = ("document", "improve", "implement")
 
 
 def _target(cfg: Config, item) -> tuple[str, Path]:
@@ -55,8 +56,17 @@ def _quality_commit_message(item, plan, wip: bool = False) -> str:
             "Co-Authored-By: Claude <noreply@anthropic.com>")
 
 
+def _implement_commit_message(item, plan, wip: bool = False) -> str:
+    head = "feat(implement) WIP:" if wip else "feat(implement):"
+    title = str(item.meta.get("title") or item.meta.get("slug", "")).strip()
+    return (f"{head} {title}\n\n"
+            f"Carried out by autobuild's implement lane from {item.path.name}, following "
+            f"{item.meta.get('plan', '(plan unset)')}, on top of {plan.base_sha[:8]}.\n\n"
+            "Co-Authored-By: Claude <noreply@anthropic.com>")
+
+
 def _contract(item) -> dict:
-    """The improve lane's contract, as the brief states it: which paths may change, which
+    """A contract lane's contract, as the brief states it: which paths may change, which
     files must exist, whose prose may be replaced, and what has to pass."""
     return {k: list(item.meta.get(k, []) or []) for k in ("allow", "verify", "require", "rewrite")}
 
@@ -117,10 +127,43 @@ def _finish_improve(item, repo: Path, plan, res: BuildResult, improve_ops,
                                    "reason": reason}
 
 
+def _finish_implement(item, repo: Path, plan, res: BuildResult, implement_ops,
+                      runner) -> tuple[str, dict, dict]:
+    """Verify the implement run against the brief's contract and commit what it was allowed
+    to change. Same shape and same gate as `_finish_improve` — this lane is allowed to change
+    behaviour, so the plan and the repo's own suite are what say it went right, not a fixed
+    file list. A red run keeps its worktree and its WIP commit: an overnight feature that got
+    halfway is evidence to read, not damage to undo."""
+    if plan is None:
+        reason = str((res.raw or {}).get("autodoc_error", "worktree preparation failed"))
+        return "needs-review", {"mode": "implement", "repo": str(repo)}, {"reason": reason}
+
+    contract = _contract(item)
+    errs = ([] if not res.is_error
+            else ["agent run failed before the contract could be verified"])
+    if not errs:
+        errs = list(implement_ops.verify_implement(plan, runner=runner, **contract))
+    extra = {"mode": "implement", "repo": str(repo), "branch": plan.branch}
+    allow = contract["allow"]
+    if (not res.is_error) and not errs:
+        implement_ops.commit_implement(plan, _implement_commit_message(item, plan), allow=allow,
+                                       runner=runner)
+        implement_ops.remove_worktree(plan, runner=runner)
+        return "done", extra, {"branch": plan.branch}
+
+    implement_ops.commit_implement(plan, _implement_commit_message(item, plan, wip=True),
+                                   allow=allow, runner=runner, wip=True)
+    reason = "; ".join(errs[:3]) or str((res.raw or {}).get("error", "agent run failed"))
+    extra |= {"worktree": str(plan.worktree), "reason": reason}
+    return "needs-review", extra, {"branch": plan.branch, "worktree": str(plan.worktree),
+                                   "reason": reason}
+
+
 def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
              runner=subprocess.run, verifier=verify_repo, builder=run_build,
              oracle_path=None, snapshot_path=None, notifier=notify,
-             autodoc_ops=_autodoc, improve_ops=_improve) -> dict:
+             autodoc_ops=_autodoc, improve_ops=_improve,
+             implement_ops=_implement) -> dict:
     state_dir = Path(state_dir)
     lock_path = state_dir / "current.lock"
     ledger_path = state_dir / "ledger.jsonl"
@@ -173,7 +216,8 @@ def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
         plan = None
         if mode in _WORKTREE_LANES:
             # The daemon owns every git write in these lanes; the agent only writes files.
-            ops = autodoc_ops if mode == "document" else improve_ops
+            ops = {"document": autodoc_ops, "improve": improve_ops,
+                   "implement": implement_ops}[mode]
             try:
                 plan = ops.prepare_worktree(repo, slug, state_dir / "worktrees",
                                             now.strftime("%Y-%m-%d"), runner=runner)
@@ -218,6 +262,9 @@ def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
             elif mode == "improve":
                 status, extra, note = _finish_improve(it, repo, plan, res, improve_ops,
                                                       runner)
+            elif mode == "implement":
+                status, extra, note = _finish_implement(it, repo, plan, res, implement_ops,
+                                                        runner)
             else:
                 green = (not res.is_error) and verifier(repo, runner=runner)
                 status = "done" if green else "needs-review"
