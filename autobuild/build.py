@@ -257,9 +257,10 @@ def run_build(brief_path: Path, repo_root: Path, model: str, pace: Pace,
 
 
 # The verify commands, per package manager. pnpm is what the playbook scaffolds with
-# now; npm stays because six projects were built before the switch and still carry a
-# package-lock.json, and verifying one of those with pnpm fails on a lockfile it will
-# not read — an infrastructure failure reported as a broken build.
+# now; npm stays for any repo that still carries a package-lock.json (the six projects
+# built before the switch were moved to pnpm on 2026-09-25), because verifying one of
+# those with pnpm fails on a lockfile it will not read — an infrastructure failure
+# reported as a broken build.
 _VERIFY_CMDS = {
     "pnpm": (["pnpm", "test"], ["pnpm", "exec", "tsc", "--noEmit"]),
     "npm": (["npm", "test", "--silent"], ["npx", "tsc", "--noEmit"]),

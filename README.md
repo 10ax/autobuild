@@ -8,8 +8,8 @@ Europe/Rome the runner writes a spec, TDD-builds a TypeScript repo under
 A brief's `mode` picks the lane:
 
 - `build` (default) — the above: write a spec, TDD-build a new project under `projects/<slug>/`,
-  verify with `pnpm test` + `tsc` (the manager is read off the repo's lockfile, so
-  the six projects built before the switch still verify with npm). Playbook: `CLAUDE.md`.
+  verify with `pnpm test` + `tsc` (the manager is read off the repo's lockfile; the six
+  projects built with npm were moved to pnpm on 2026-09-25). Playbook: `CLAUDE.md`.
 - `document` — write a doc set (README, CLAUDE.md, `docs/WORKING-ON-THIS.md`,
   `docs/CODE-MAP.md`) into a repo that **already exists**, named by the brief's `repo` key.
   Playbook: `AUTODOC.md`.
