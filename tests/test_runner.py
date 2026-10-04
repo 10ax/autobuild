@@ -130,3 +130,26 @@ class TestOpenCodeRunner(unittest.TestCase):
         r.parse(json.dumps({"type": "text", "sessionID": "ses_x"}))
         r.apply_usage(None)
         self.assertIsNone(getattr(r, "last_usage", None))
+
+
+class TestModelMapping(unittest.TestCase):
+    """The governor escalates between 'sonnet' and 'opus' — Claude's names. A metered
+    backend has its own, so a tier has to be resolved to a real model id per provider or
+    the run is handed a model that does not exist."""
+
+    def test_seat_passes_tiers_through(self):
+        r = build_runner("claude", cfg())
+        self.assertEqual(r.resolve_model("sonnet"), "sonnet")
+        self.assertEqual(r.resolve_model("opus"), "opus")
+
+    def test_opencode_maps_both_tiers(self):
+        c = cfg(opencode_model="opencode-go/deepseek-v4.1-flash",
+                opencode_model_high="opencode-go/deepseek-v4-pro")
+        r = build_runner("opencode", c)
+        self.assertEqual(r.resolve_model("sonnet"), "opencode-go/deepseek-v4.1-flash")
+        self.assertEqual(r.resolve_model("opus"), "opencode-go/deepseek-v4-pro")
+
+    def test_opencode_unknown_tier_is_passed_through(self):
+        """A literal model id is a legitimate thing to ask for; only the tiers are aliases."""
+        r = build_runner("opencode", cfg())
+        self.assertEqual(r.resolve_model("opencode-go/grok-4.7"), "opencode-go/grok-4.7")

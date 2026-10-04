@@ -42,6 +42,15 @@ class Runner:
     def parse(self, stdout: str) -> BuildResult:
         raise NotImplementedError
 
+    def resolve_model(self, tier: str) -> str:
+        """Turn the governor's model tier into this backend's model id.
+
+        The governor escalates between 'sonnet' and 'opus'. Those are Claude's names; a
+        backend that does not know them must translate, or every run is handed a model that
+        does not exist. A literal model id is passed through untouched.
+        """
+        return tier
+
     def apply_usage(self, usage: dict | None) -> None:
         """Attach cost/usage the backend reports out of band. No-op where the CLI
         already prints cost in its own stream."""
@@ -105,7 +114,16 @@ class OpenCodeRunner(Runner):
     metered = True
 
     def argv(self, prompt, repo_root, model, work_dir=None) -> list[str]:
-        return ["opencode", "run", prompt, "--format", "json", "--auto", "--model", model]
+        return ["opencode", "run", prompt, "--format", "json", "--auto",
+                "--model", self.resolve_model(model)]
+
+    def resolve_model(self, tier: str) -> str:
+        # Only the governor's tiers are aliases; anything else is already a model id.
+        if tier == "opus":
+            return self.cfg.opencode_model_high
+        if tier == "sonnet":
+            return self.cfg.opencode_model
+        return tier
 
     def parse(self, stdout: str) -> BuildResult:
         session_id = None
