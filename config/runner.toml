@@ -31,6 +31,27 @@ burst_before_reset_h = 24.0
 stack = "typescript"
 default_model = "sonnet"
 
+# Which backend a build runs on.
+#   "claude"   — Claude Code on the subscription seat. A weekly quota, so the pace guard
+#                in [pace] rations it. This is the original behaviour.
+#   "opencode" — OpenCode against a metered provider (billed per token). There is no weekly
+#                quota to ration, so the weekly ceiling / daily cap / burst are skipped and
+#                the learned cost ceiling is the budget instead.
+[runner]
+provider = "claude"
+
+[safety]
+# A metered backend bills per token and this daemon builds unattended, typically overnight.
+# While this is false the daemon starts, reports healthy, and refuses to build on a metered
+# provider — an explicit opt-in is the whole point. Turn it on only once builds run inside a
+# real containment boundary.
+#
+# Why the caution: on the seat a build is scoped by --permission-mode bypassPermissions plus
+# --add-dir ~/autobuild --add-dir <worktree>, i.e. exactly two paths. `opencode run --auto`
+# auto-approves permissions but has no equivalent scoping flag, so it can reach anything the
+# user can. That is a wider boundary than the path this replaces.
+allow_metered = false
+
 [notify]
 telegram_script = "~/.claude/notify-telegram.sh"
 notify_on = ["done", "needs-review", "paused", "crash"]
