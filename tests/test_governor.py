@@ -222,3 +222,43 @@ class TestGovernor(unittest.TestCase):
         self.assertEqual(st.day_start_pct, 3.0)
         roll_day(st, _dt(26, 1), UsageSignal(used_pct_7d=8.0))     # new calendar day → re-baseline
         self.assertEqual((st.day_start, st.day_start_pct), ("2026-07-26", 8.0))
+
+
+class TestMeteredGovernor(unittest.TestCase):
+    """On a metered provider the weekly quota does not exist, so the guard built around it
+    must not run. Everything that is about the clock or real spend still applies."""
+
+    def test_metered_ignores_the_weekly_ceiling(self):
+        # 90% of a weekly quota would pause on the seat; on a metered provider it is
+        # meaningless, so work continues.
+        p = compute_pace(_dt(25, 12), _cfg(weekly_guard_enabled=True, metered=True),
+                         GovernorState(day_start="2026-07-25", day_start_pct=90.0),
+                         signal=UsageSignal(used_pct_5h=5.0, used_pct_7d=90.0))
+        self.assertNotEqual(p.level, "pause")
+
+    def test_metered_does_not_fail_closed_on_a_missing_signal(self):
+        # The seat fails closed with no live 7d% because it cannot see its quota. A metered
+        # provider has no quota to see: pausing here would stall the daemon forever, since
+        # nothing feeds a statusline snapshot for it.
+        p = compute_pace(_dt(25, 12), _cfg(weekly_guard_enabled=True, metered=True),
+                         GovernorState(), signal=UsageSignal())
+        self.assertNotEqual(p.level, "pause")
+
+    def test_metered_still_respects_quiet_hours(self):
+        p = compute_pace(_at(12), _cfg(metered=True), GovernorState())
+        self.assertEqual(p.level, "pause")
+
+    def test_metered_ignores_a_rejected_seat_status(self):
+        # status="rejected" is the seat's 5h window. A metered run cannot produce it, and
+        # acting on it would pause for hours over a signal that means something else.
+        p = compute_pace(_dt(25, 12), _cfg(metered=True), GovernorState(),
+                         signal=UsageSignal(status="rejected", used_pct_7d=10.0))
+        self.assertNotEqual(p.level, "pause")
+
+    def test_metered_still_pauses_on_the_learned_cost_ceiling(self):
+        # Cost is the metered analogue of the quota: once the learned ceiling is spent,
+        # stop, exactly as the seat does.
+        st = GovernorState(window_start=_dt(25, 11).timestamp(), window_spend_usd=10.0,
+                           learned_ceiling_usd=10.0)
+        p = compute_pace(_dt(25, 12), _cfg(metered=True), st)
+        self.assertEqual(p.level, "pause")

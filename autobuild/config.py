@@ -40,6 +40,9 @@ class Config:
     # Metered backends bill per token, so an unattended loop spends real money. Off by
     # default: the daemon refuses to build until this is explicitly turned on.
     allow_metered: bool = False
+    # Set by the daemon from the resolved runner. NOT read from the toml: a flag that
+    # could be typed by hand is a flag that can disagree with the backend actually used.
+    metered: bool = False
     telegram_script: str = "~/.claude/notify-telegram.sh"
     notify_on: list[str] = field(
         default_factory=lambda: ["done", "needs-review", "paused", "crash"]
