@@ -51,10 +51,22 @@ class TestClaudeSeatRunner(unittest.TestCase):
         self.assertIn("bypassPermissions", argv)
         self.assertEqual(argv[argv.index("--model") + 1], "sonnet")
 
-    def test_work_dir_adds_a_second_add_dir(self):
-        argv = ClaudeSeatRunner(cfg()).argv("P", "/repo", "sonnet", work_dir="/wt")
+    def test_scopes_add_dir_to_the_autobuild_root_not_the_target_repo(self):
+        """--add-dir IS the filesystem scope of a bypassPermissions build. It grants the
+        autobuild root (playbooks) plus the worktree; the target repo dir is named in the
+        prompt but deliberately not granted, so the user's checkout stays out of reach."""
+        from pathlib import Path
+        argv = ClaudeSeatRunner(cfg(root=Path("/autobuild"))).argv("P", "/repo", "sonnet",
+                                                                   work_dir="/wt")
         dirs = [argv[i + 1] for i, a in enumerate(argv) if a == "--add-dir"]
-        self.assertEqual(dirs, ["/repo", "/wt"])
+        self.assertEqual(dirs, ["/autobuild", "/wt"])
+        self.assertNotIn("/repo", dirs)
+
+    def test_no_work_dir_grants_only_the_root(self):
+        from pathlib import Path
+        argv = ClaudeSeatRunner(cfg(root=Path("/autobuild"))).argv("P", "/repo", "sonnet")
+        dirs = [argv[i + 1] for i, a in enumerate(argv) if a == "--add-dir"]
+        self.assertEqual(dirs, ["/autobuild"])
 
     def test_parses_stream_json_result(self):
         stdout = json.dumps({"type": "result", "is_error": False, "total_cost_usd": 1.25,

@@ -70,6 +70,41 @@ class TestDaemon(unittest.TestCase):
         self.assertEqual(item.meta["status"], "done")
         self.assertEqual(read_ledger(root / "state" / "ledger.jsonl")[0]["status"], "done")
 
+
+class TestMeteredDaemon(unittest.TestCase):
+    """A metered provider must not be able to spend unattended money by accident, and must
+    not be paced by a quota it does not have."""
+
+    def test_metered_refuses_to_build_without_the_opt_in(self):
+        root = _root()
+        res = _run(_C(root, metered=True), NIGHT, GovernorState(), root / "state",
+                   builder=lambda *a, **k: BuildResult(is_error=False, cost_usd=9.0),
+                   verifier=lambda *a, **k: True, **_sig(root))
+        self.assertEqual(res["action"], "blocked")
+        self.assertIn("metered", res["reason"].lower())
+        item = [i for i in scan_backlog(root / "backlog") if i.meta["slug"] == "alpha"][0]
+        self.assertEqual(item.meta["status"], "pending")   # untouched, not even marked building
+
+    def test_metered_builds_once_the_opt_in_is_set(self):
+        root = _root()
+        res = _run(_C(root, metered=True, allow_metered=True, max_concurrency=1), NIGHT,
+                   GovernorState(), root / "state",
+                   builder=lambda *a, **k: BuildResult(is_error=False, cost_usd=1.5),
+                   verifier=lambda *a, **k: True, **_sig(root))
+        self.assertEqual(res["action"], "built")
+
+    def test_metered_equipment_is_not_paced_by_the_weekly_quota(self):
+        # A 7d% over the ceiling would pause the seat. Nothing feeds a 7d% for a metered
+        # backend, so acting on one would stall the daemon permanently.
+        root = _root()
+        sig = _sig(root)
+        sig["oracle_path"].write_text(json.dumps({"status": "allowed", "written_at": 0}))
+        res = _run(_C(root, metered=True, allow_metered=True, max_concurrency=1,
+                      weekly_guard_enabled=True), NIGHT, GovernorState(), root / "state",
+                   builder=lambda *a, **k: BuildResult(is_error=False, cost_usd=1.0),
+                   verifier=lambda *a, **k: True, **sig)
+        self.assertEqual(res["action"], "built")
+
     def test_manual_pause_flag_pauses_and_builds_nothing(self):
         # A state/pause file (written by the web console) forces a pause even inside an
         # active build window, and nothing is built until it is removed.

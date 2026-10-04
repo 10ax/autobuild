@@ -19,7 +19,7 @@ import os
 import shutil
 import subprocess
 
-from autobuild.build import BuildResult, parse_result
+from autobuild.result import BuildResult
 from autobuild.config import Config
 
 SEAT = ("claude",)
@@ -70,13 +70,21 @@ class ClaudeSeatRunner(Runner):
         # stream-json (+ --verbose, required for it in print mode) so each build also emits the
         # `rate_limit_event` carrying the real limit status + exact resetsAt. The final `result`
         # event still carries everything the batch json result did.
+        #
+        # --add-dir is the whole filesystem scope of a bypassPermissions build: the autobuild
+        # root (playbooks, CLAUDE.md) plus the lane's worktree. `repo_root` is named in the
+        # prompt but deliberately NOT granted — a worktree lane works in its worktree, and the
+        # user's checkout must stay out of reach.
         argv = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose",
-                "--permission-mode", "bypassPermissions", "--add-dir", str(repo_root)]
+                "--permission-mode", "bypassPermissions", "--add-dir", str(self.cfg.root)]
         if work_dir is not None:
             argv += ["--add-dir", str(work_dir)]
         return argv + ["--model", model]
 
     def parse(self, stdout: str) -> BuildResult:
+        # Imported here, not at module scope: build.py imports build_runner() from this
+        # module, so a top-level import of its parser would be circular.
+        from autobuild.build import parse_result
         return parse_result(stdout)
 
 

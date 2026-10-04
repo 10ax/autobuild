@@ -2,6 +2,7 @@
 from __future__ import annotations
 import argparse
 import subprocess
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -14,11 +15,13 @@ from autobuild.governor import (Pace, compute_pace, record_spend, update_ceiling
                                 anchor_window, roll_day, next_active_time)
 from autobuild.backlog import scan_backlog, select_pending, set_status, add_lock, clear_lock, read_lock
 from autobuild.build import run_build, verify_repo, BuildResult
+from autobuild.runner import build_runner
 from autobuild import autodoc as _autodoc
 from autobuild import improve as _improve
 from autobuild import implement as _implement
 from autobuild.autodoc import AutodocError
 from autobuild.notify import notify
+from autobuild.safety import metered_guard
 from autobuild.spec import validate_spec
 from autobuild.usage import read_signal, write_oracle
 
@@ -177,6 +180,15 @@ def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
     if (state_dir / "pause").exists():
         return {"action": "pause", "pace": Pace("pause", 0, False, cfg.default_model), "manual": True}
 
+    # Metered safety: a per-token backend plus an unattended overnight loop is a bill nobody
+    # is watching. Checked before any work is taken, so a blocked run leaves the backlog
+    # untouched rather than marking items building and stalling them.
+    blocked = metered_guard(cfg, metered=cfg.metered, allow_metered=cfg.allow_metered,
+                            provider=cfg.provider)
+    if blocked:
+        return {"action": "blocked", "reason": blocked,
+                "pace": Pace("pause", 0, False, cfg.default_model)}
+
     signal = read_signal(oracle_path, snapshot_path, now)
     roll_day(state, now, signal)          # maintain the per-day weekly-% baseline
     pace = compute_pace(now, cfg, state, signal)
@@ -289,6 +301,19 @@ def main(argv: list[str]) -> int:
     args = ap.parse_args(argv)
 
     cfg = load_config(Path(args.config))
+    # Resolve the backend once, at startup: an unknown provider or a backend that cannot
+    # run is a reason to refuse to start, not to fail every build for a week. `metered`
+    # is stamped from the runner rather than read from the file, so the guard can never
+    # disagree with the backend actually in use.
+    runner = build_runner(cfg.provider, cfg)
+    reason = runner.preflight()
+    if reason:
+        print(f"autobuild: cannot run on provider {cfg.provider!r}: {reason}", file=sys.stderr)
+        return 1
+    cfg.metered = runner.metered
+    if runner.metered:
+        print(f"autobuild: provider {cfg.provider!r} is metered; "
+              f"allow_metered={cfg.allow_metered}", file=sys.stderr)
     tz = ZoneInfo(cfg.timezone)
     state_dir = cfg.root / "state"
 

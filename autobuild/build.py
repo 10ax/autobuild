@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from autobuild.config import Config
 from autobuild.governor import Pace
+from autobuild.result import BuildResult
+from autobuild.runner import build_runner
 
 _RESET = re.compile(r'(?:reset_at|resetsAt|"reset")\D{0,4}(\d{10})')
 _RL_MARKERS = ("rate limit", "rate_limit", "usage limit", "429", "exceeded your")
@@ -122,21 +124,22 @@ def _lane_prompt(mode: str, brief_path: Path, repo_root: Path, work_dir: Path,
                     .replace("{ROOT}", str(Path(cfg.root))))
 
 
+def _build_prompt(brief_path: Path, repo_root: Path, cfg: Config, mode: str = "build",
+                  work_dir: Path | None = None) -> str:
+    """The prompt for one run. A lane's prompts/<lane>.md is the source of truth when
+    present; the constants keep a lane working (and unit-testable) if it is missing."""
+    if mode in _LANE_PROMPTS:
+        return _lane_prompt(mode, brief_path, repo_root, Path(work_dir or repo_root), cfg)
+    return (f"Build backlog item: {brief_path}. Target repo dir: {repo_root}. "
+            f"Follow the process in {Path(cfg.root)}/CLAUDE.md exactly.")
+
+
 def build_argv(brief_path: Path, repo_root: Path, model: str, cfg: Config,
                mode: str = "build", work_dir: Path | None = None) -> list[str]:
-    if mode in _LANE_PROMPTS:
-        prompt = _lane_prompt(mode, brief_path, repo_root, Path(work_dir or repo_root), cfg)
-    else:
-        prompt = (f"Build backlog item: {brief_path}. Target repo dir: {repo_root}. "
-                  f"Follow the process in {Path(cfg.root)}/CLAUDE.md exactly.")
-    # stream-json (+ --verbose, required for it in print mode) so each build also emits the
-    # `rate_limit_event` carrying the real limit status + exact resetsAt. The final `result`
-    # event still carries everything the batch json result did.
-    argv = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose",
-            "--permission-mode", "bypassPermissions", "--add-dir", str(cfg.root)]
-    if work_dir is not None:
-        argv += ["--add-dir", str(work_dir)]
-    return argv + ["--model", model]
+    """Kept for the seat path and its existing tests; the provider seam is runner.py."""
+    prompt = _build_prompt(brief_path, repo_root, cfg, mode=mode, work_dir=work_dir)
+    return build_runner(getattr(cfg, "provider", "claude"), cfg).argv(
+        prompt, str(repo_root), model, work_dir=str(work_dir) if work_dir else None)
 
 
 def _iter_json(stdout: str):
@@ -222,9 +225,17 @@ def parse_result(stdout: str) -> BuildResult:
 
 def run_build(brief_path: Path, repo_root: Path, model: str, pace: Pace,
               cfg: Config, mode: str = "build", work_dir: Path | None = None,
-              runner=subprocess.run, clock=time.monotonic) -> BuildResult:
-    argv = build_argv(brief_path, repo_root, model, cfg, mode=mode, work_dir=work_dir)
-    # AUTOBUILD_NO_NOTIFY marks THIS build's headless claude (and any subagents) so its Stop hook
+              runner=subprocess.run, clock=time.monotonic,
+              provider_runner=None) -> BuildResult:
+    # `runner` is the injectable process runner tests stand in for; `provider_runner` is
+    # the backend (seat vs metered). Keeping them separate means every existing test that
+    # fakes the process call keeps working, and the backend stays swappable.
+    if provider_runner is None:
+        provider_runner = build_runner(getattr(cfg, "provider", "claude"), cfg)
+    prompt = _build_prompt(brief_path, repo_root, cfg, mode=mode, work_dir=work_dir)
+    argv = provider_runner.argv(prompt, str(repo_root), model,
+                                work_dir=str(work_dir) if work_dir else None)
+    # AUTOBUILD_NO_NOTIFY marks THIS build's headless agent (and any subagents) so its Stop hook
     # stays quiet — the daemon sends its own richer ✅/⚠️. Scoped to the build env only, never the
     # daemon, so the daemon's own notify path is unaffected.
     env = dict(os.environ, PACE=("high" if pace.subagents else "low"), AUTOBUILD_NO_NOTIFY="1")
@@ -239,7 +250,7 @@ def run_build(brief_path: Path, repo_root: Path, model: str, pace: Pace,
         partial = e.stdout or e.output or ""
         if isinstance(partial, bytes):
             partial = partial.decode("utf-8", "replace")
-        result = parse_result(partial)
+        result = provider_runner.parse(partial)
         result.is_error = True
         result.duration_s = clock() - start
         result.raw = {**(result.raw or {}), "timeout": True}
@@ -247,12 +258,20 @@ def run_build(brief_path: Path, repo_root: Path, model: str, pace: Pace,
     except OSError as e:
         return BuildResult(is_error=True, cost_usd=0.0,
                            duration_s=clock() - start, raw={"error": str(e)})
-    result = parse_result(cp.stdout or "")
+    result = provider_runner.parse(cp.stdout or "")
     result.duration_s = clock() - start
     rc = getattr(cp, "returncode", 0)
     if rc != 0:
         result.is_error = True
         result.raw = {**(result.raw or {}), "returncode": rc}
+    # A metered backend prints no cost, so read it back from the finished session; the
+    # governor needs a real number to cap spend.
+    if provider_runner.metered and result.session_id:
+        usage = getattr(provider_runner, "session_usage", lambda *_: None)(result.session_id)
+        provider_runner.apply_usage(usage)
+        if isinstance(usage, dict):
+            result.cost_usd = float(usage.get("cost") or 0.0)
+            result.usage = dict(usage.get("tokens") or {})
     return result
 
 
