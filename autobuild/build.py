@@ -265,13 +265,25 @@ def run_build(brief_path: Path, repo_root: Path, model: str, pace: Pace,
         result.is_error = True
         result.raw = {**(result.raw or {}), "returncode": rc}
     # A metered backend prints no cost, so read it back from the finished session; the
-    # governor needs a real number to cap spend.
-    if provider_runner.metered and result.session_id:
-        usage = getattr(provider_runner, "session_usage", lambda *_: None)(result.session_id)
+    # governor's budget is built on that number. An unreadable cost must NEVER be reported
+    # as 0.0: record_spend would bank a free build and the learned ceiling would never
+    # advance, so real money could be spent while the governor believed nothing was. Treat
+    # it as an errored run and say so, rather than inventing a number.
+    if provider_runner.metered:
+        usage = None
+        if result.session_id:
+            usage = getattr(provider_runner, "session_usage", lambda *_: None)(result.session_id)
+        cost = usage.get("cost") if isinstance(usage, dict) else None
+        if not isinstance(cost, (int, float)) or isinstance(cost, bool):
+            result.is_error = True
+            result.raw = {**(result.raw or {}),
+                          "cost_unreadable": (usage if usage is None else "not a number")}
+            return result
         provider_runner.apply_usage(usage)
-        if isinstance(usage, dict):
-            result.cost_usd = float(usage.get("cost") or 0.0)
-            result.usage = dict(usage.get("tokens") or {})
+        result.cost_usd = float(cost)
+        tokens = usage.get("tokens")
+        if isinstance(tokens, dict):
+            result.usage = dict(tokens)
     return result
 
 

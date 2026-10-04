@@ -77,13 +77,23 @@ class TestMeteredDaemon(unittest.TestCase):
 
     def test_metered_refuses_to_build_without_the_opt_in(self):
         root = _root()
-        res = _run(_C(root, metered=True), NIGHT, GovernorState(), root / "state",
+        res = _run(_C(root, metered=True, provider="opencode"), NIGHT, GovernorState(),
+                   root / "state",
                    builder=lambda *a, **k: BuildResult(is_error=False, cost_usd=9.0),
                    verifier=lambda *a, **k: True, **_sig(root))
         self.assertEqual(res["action"], "blocked")
         self.assertIn("metered", res["reason"].lower())
         item = [i for i in scan_backlog(root / "backlog") if i.meta["slug"] == "alpha"][0]
         self.assertEqual(item.meta["status"], "pending")   # untouched, not even marked building
+
+    def test_guard_does_not_depend_on_the_metered_flag_being_stamped(self):
+        """provider alone is enough to refuse: a caller that forgets to stamp cfg.metered
+        must not be able to slip an unattended metered run past the guard."""
+        root = _root()
+        res = _run(_C(root, provider="opencode"), NIGHT, GovernorState(), root / "state",
+                   builder=lambda *a, **k: BuildResult(is_error=False, cost_usd=9.0),
+                   verifier=lambda *a, **k: True, **_sig(root))
+        self.assertEqual(res["action"], "blocked")
 
     def test_metered_builds_once_the_opt_in_is_set(self):
         root = _root()
@@ -104,6 +114,19 @@ class TestMeteredDaemon(unittest.TestCase):
                    builder=lambda *a, **k: BuildResult(is_error=False, cost_usd=1.0),
                    verifier=lambda *a, **k: True, **sig)
         self.assertEqual(res["action"], "built")
+
+    def test_unreadable_cost_is_not_banked_as_free_spend(self):
+        """recording 0.0 for a metered run whose cost could not be read would tell the
+        learned ceiling that a real spend was free, so the budget would never advance."""
+        root = _root()
+        _run(_C(root, metered=True, allow_metered=True, max_concurrency=1), NIGHT,
+             GovernorState(), root / "state",
+             builder=lambda *a, **k: BuildResult(is_error=True, cost_usd=0.0,
+                                                 raw={"cost_unreadable": None}),
+             verifier=lambda *a, **k: True, **_sig(root))
+        gov = json.loads((root / "state" / "governor.json").read_text())
+        self.assertEqual(gov.get("weekly_spend_usd", 0.0), 0.0)
+        self.assertEqual(gov.get("window_spend_usd", 0.0), 0.0)
 
     def test_manual_pause_flag_pauses_and_builds_nothing(self):
         # A state/pause file (written by the web console) forces a pause even inside an

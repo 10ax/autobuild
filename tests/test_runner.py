@@ -7,6 +7,7 @@ owns its argv and its parse; `run_build` only knows the protocol.
 """
 import json
 import unittest
+from pathlib import Path
 
 from autobuild.config import Config
 from autobuild.runner import (ClaudeSeatRunner, OpenCodeRunner, build_runner,
@@ -14,7 +15,6 @@ from autobuild.runner import (ClaudeSeatRunner, OpenCodeRunner, build_runner,
 
 
 def cfg(**kw) -> Config:
-    from pathlib import Path
     base = dict(root=Path("/tmp/autobuild-runner-test"))
     base.update(kw)
     return Config(**base)
@@ -130,6 +130,102 @@ class TestOpenCodeRunner(unittest.TestCase):
         r.parse(json.dumps({"type": "text", "sessionID": "ses_x"}))
         r.apply_usage(None)
         self.assertIsNone(getattr(r, "last_usage", None))
+
+
+class FakeMeteredRunner:
+    """A metered runner stand-in: real argv/parse shape, stubbed session read-back."""
+
+    metered = True
+
+    def __init__(self, cfg=None):
+        self.cfg = cfg
+
+    def argv(self, *a, **k):
+        return ["true"]
+
+    def parse(self, out):
+        from autobuild.result import BuildResult
+        session_id = "ses_x" if "sessionID" in (out or "") else None
+        return BuildResult(is_error=False, cost_usd=0.0, session_id=session_id)
+
+    def session_usage(self, sid):
+        return None
+
+    def apply_usage(self, usage):
+        self.last_usage = usage
+
+
+class TestMeteredCostReadback(unittest.TestCase):
+    """`opencode run` prints no cost, so it is read back from the finished session. The
+    governor's budget is built on that number, so an unreadable cost must never be
+    reported as zero — that would spend real money while the ceiling stands still."""
+
+    def _cfg(self):
+        from pathlib import Path
+        return Config(root=Path("/autobuild"), provider="opencode", metered=True)
+
+    def _pace(self):
+        from autobuild.governor import Pace
+        return Pace("low", 1, False, "sonnet")
+
+    def _run(self, runner_obj, stdout='{"type":"text","sessionID":"ses_x"}'):
+        from autobuild.build import run_build
+        def fake_proc(*a, **k):
+            class CP:
+                returncode = 0
+                stdout = '{"type":"text","sessionID":"ses_x"}'
+            return CP()
+        return run_build(Path("/b/x.md"), Path("/repo"), "sonnet", self._pace(),
+                         self._cfg(), runner=fake_proc, provider_runner=runner_obj)
+
+    def test_readback_fills_the_cost(self):
+        class R(FakeMeteredRunner):
+            def session_usage(self, sid):
+                return {"cost": 0.42, "tokens": {"input": 5, "output": 1}}
+        res = self._run(R())
+        self.assertEqual(res.cost_usd, 0.42)
+        self.assertEqual(res.usage["input"], 5)
+
+    def test_unreadable_cost_is_an_error_not_a_free_build(self):
+        class R(FakeMeteredRunner):
+            def session_usage(self, sid):
+                return None
+        res = self._run(R())
+        self.assertTrue(res.is_error, "an unknown cost must not look like a successful free build")
+        self.assertIn("cost", str(res.raw).lower())
+
+    def test_no_session_id_is_also_unreadable(self):
+        class R(FakeMeteredRunner):
+            def parse(self, out):
+                from autobuild.result import BuildResult
+                return BuildResult(is_error=False, cost_usd=0.0, session_id=None)
+        res = self._run(R())
+        self.assertTrue(res.is_error)
+
+    def test_zero_cost_from_the_provider_is_accepted(self):
+        """A genuinely free model reports cost 0 — that is a real number, not a failure."""
+        class R(FakeMeteredRunner):
+            def session_usage(self, sid):
+                return {"cost": 0.0, "tokens": {"input": 1, "output": 1}}
+        res = self._run(R())
+        self.assertFalse(res.is_error)
+        self.assertEqual(res.cost_usd, 0.0)
+
+    def test_garbage_cost_does_not_crash_the_worker(self):
+        class R(FakeMeteredRunner):
+            def session_usage(self, sid):
+                return {"cost": "not-a-number", "tokens": "not-a-dict"}
+        res = self._run(R())          # must not raise
+        self.assertTrue(res.is_error)
+
+    def test_seat_never_consults_the_readback(self):
+        """The seat prints its own cost; the read-back must not run for it."""
+        class R(FakeMeteredRunner):
+            metered = False
+            def session_usage(self, sid):
+                raise AssertionError("seat must not read back usage")
+        res = self._run(R())
+        self.assertFalse(res.is_error)
 
 
 class TestModelMapping(unittest.TestCase):

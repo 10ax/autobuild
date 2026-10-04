@@ -182,9 +182,10 @@ def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
 
     # Metered safety: a per-token backend plus an unattended overnight loop is a bill nobody
     # is watching. Checked before any work is taken, so a blocked run leaves the backlog
-    # untouched rather than marking items building and stalling them.
-    blocked = metered_guard(cfg, metered=cfg.metered, allow_metered=cfg.allow_metered,
-                            provider=cfg.provider)
+    # untouched rather than marking items building and stalling them. `metered` is derived
+    # from the runner rather than trusted from cfg, so this cannot fail open if a caller
+    # forgets to stamp the config field.
+    blocked = metered_guard(cfg)
     if blocked:
         return {"action": "blocked", "reason": blocked,
                 "pace": Pace("pause", 0, False, cfg.default_model)}
@@ -264,7 +265,12 @@ def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
                          if reset else "")
             notifier(cfg, "paused", reason=f"rate limited on {slug}{reset_str}", runner=runner)
         else:
-            record_spend(state, res.cost_usd, now)
+            # Never bank a cost the backend could not report. On a metered provider that
+            # means the run was already flagged errored (build.run_build refuses to invent
+            # a number); recording 0.0 here would tell the learned ceiling that a real
+            # spend was free, so the budget would never advance.
+            if not res.raw.get("cost_unreadable"):
+                record_spend(state, res.cost_usd, now)
             # Per-build capture: keep the shared oracle warm from a benign (allowed) event.
             if res.rate_status:
                 write_oracle(oracle_path, res.rate_status, res.rate_reset_at, "five_hour", now)

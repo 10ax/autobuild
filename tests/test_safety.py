@@ -25,6 +25,16 @@ class TestMeteredGuard(unittest.TestCase):
         """The seat has a weekly quota, not a bill — nothing to protect."""
         self.assertIsNone(metered_guard(cfg(), metered=False, allow_metered=False))
 
+    def test_guard_derives_metered_from_the_provider_when_not_given(self):
+        """The guard must not depend on a caller having stamped cfg.metered: a Config that
+        says provider=opencode but was never stamped still bills per token."""
+        reason = metered_guard(cfg(provider="opencode"))
+        self.assertIsNotNone(reason)
+        self.assertIn("opencode", reason)
+
+    def test_derived_guard_still_allows_the_seat(self):
+        self.assertIsNone(metered_guard(cfg(provider="claude")))
+
     def test_metered_is_refused_by_default(self):
         reason = metered_guard(cfg(), metered=True, allow_metered=False)
         self.assertIsNotNone(reason)

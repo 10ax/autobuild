@@ -9,7 +9,7 @@ from __future__ import annotations
 from autobuild.config import Config
 
 
-def metered_guard(cfg: Config, metered: bool, allow_metered: bool,
+def metered_guard(cfg: Config, metered: bool | None = None, allow_metered: bool = False,
                   provider: str | None = None) -> str | None:
     """None when the daemon may build, else the reason it must not.
 
@@ -17,14 +17,22 @@ def metered_guard(cfg: Config, metered: bool, allow_metered: bool,
     so starting it on a metered provider is how a loop nobody is watching turns into a
     bill nobody expected. The seat has a weekly quota instead of a bill, so it is always
     allowed through here.
+
+    `metered` defaults to None meaning "derive it": asking the runner registry is the only
+    way to be sure the flag agrees with the backend actually about to run. A caller that
+    passes a stale `cfg.metered` is the failure mode this guards against, so it is not the
+    default.
     """
+    provider = provider or getattr(cfg, "provider", "claude")
+    if metered is None:
+        from autobuild.runner import build_runner
+        metered = build_runner(provider, cfg).metered
     if not metered:
         return None
-    if allow_metered:
+    if allow_metered or getattr(cfg, "allow_metered", False):
         return None
-    who = provider or "the configured provider"
     return (
-        f"{who} is a metered backend (billed per token) and this daemon builds unattended. "
+        f"{provider} is a metered backend (billed per token) and this daemon builds unattended. "
         f"Refusing to start work. Set [safety] allow_metered = true in runner.toml to accept "
         f"the cost, or run it supervised."
     )
