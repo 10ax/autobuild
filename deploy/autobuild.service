@@ -22,7 +22,7 @@ ProtectSystem=strict
 ProtectKernelTunables=yes
 ProtectControlGroups=yes
 PrivateTmp=yes
-ReadWritePaths=%h/autobuild %h/.claude %h/.claude.json %h/.claude.json.bak %h/.npm %h/.cache %h/.config %h/.tokensave %h/.local/state
+ReadWritePaths=%h/autobuild %h/.claude %h/.claude.json %h/.npm %h/.cache %h/.config %h/.tokensave %h/.local/state
 
 [Install]
 WantedBy=default.target
