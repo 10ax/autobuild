@@ -70,6 +70,13 @@ class TestConfigDefaults(unittest.TestCase):
         with self.assertRaises(ConfigError):
             load_config(self._toml('[runner]\nprovider = "nope"\n'))
 
+    def test_metered_cannot_be_set_from_the_config_file(self):
+        """`metered` is stamped by the daemon from the resolved runner. A hand-written key
+        could disagree with the backend actually in use, which is how a metered run would
+        get past the guard."""
+        c = load_config(self._toml("[runner]\nmetered = true\n[safety]\nmetered = true\n"))
+        self.assertFalse(c.metered)
+
     def _toml(self, extra: str) -> Path:
         import tempfile
         d = Path(tempfile.mkdtemp())

@@ -255,6 +255,25 @@ class TestMeteredGovernor(unittest.TestCase):
                          signal=UsageSignal(status="rejected", used_pct_7d=10.0))
         self.assertNotEqual(p.level, "pause")
 
+    def test_metered_ignores_a_stale_seat_5h_percentage(self):
+        """The 5h % comes from the seat's statusline. On the same host the user runs Claude
+        Code interactively, so a fresh reading exists — and pacing metered work off it would
+        use the wrong meter entirely."""
+        st = GovernorState(window_start=_dt(25, 11).timestamp(), window_spend_usd=9.0,
+                           learned_ceiling_usd=10.0)
+        p = compute_pace(_dt(25, 12), _cfg(metered=True), st,
+                         signal=UsageSignal(used_pct_5h=95.0, used_pct_7d=10.0))
+        # 95% of the seat's 5h window would clamp the seat to pause; here the learned cost
+        # ceiling (1.0 left of 10.0) governs instead, so work continues.
+        self.assertNotEqual(p.level, "pause")
+
+    def test_seat_still_uses_the_live_5h_percentage(self):
+        st = GovernorState(window_start=_dt(25, 11).timestamp(), window_spend_usd=9.0,
+                           learned_ceiling_usd=10.0)
+        p = compute_pace(_dt(25, 12), _cfg(metered=False), st,
+                         signal=UsageSignal(used_pct_5h=99.0))
+        self.assertEqual(p.level, "pause")
+
     def test_metered_still_pauses_on_the_learned_cost_ceiling(self):
         # Cost is the metered analogue of the quota: once the learned ceiling is spent,
         # stop, exactly as the seat does.
