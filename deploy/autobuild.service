@@ -2,6 +2,12 @@
 [Unit]
 Description=Autobuild runner (autonomous overnight builder)
 After=network-online.target
+# Restart=always with no start limit is how a permanent startup failure spins forever
+# unnoticed: this unit restarted 8710 times over ~10 days on a stale ReadWritePaths entry,
+# and "activating (auto-restart)" hid it. Give up after a few tries so a broken unit reads
+# as failed. (These two belong in [Unit], not [Service].)
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
