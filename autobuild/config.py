@@ -34,6 +34,12 @@ class Config:
     burst_before_reset_h: float = 24.0
     stack: str = "typescript"
     default_model: str = "sonnet"
+    # Which provider a build runs on. "claude" is the subscription seat (a weekly quota);
+    # "opencode" is a metered provider billed per token. See runner.py.
+    provider: str = "claude"
+    # Metered backends bill per token, so an unattended loop spends real money. Off by
+    # default: the daemon refuses to build until this is explicitly turned on.
+    allow_metered: bool = False
     telegram_script: str = "~/.claude/notify-telegram.sh"
     notify_on: list[str] = field(
         default_factory=lambda: ["done", "needs-review", "paused", "crash"]
@@ -47,6 +53,7 @@ def load_config(path: Path, root: Path | None = None) -> Config:
     data = tomllib.loads(path.read_text())
     hours, pace = data.get("hours", {}), data.get("pace", {})
     build, notify = data.get("build", {}), data.get("notify", {})
+    runner_section, safety = data.get("runner", {}), data.get("safety", {})
     cfg = Config(
         root=Path(root).resolve() if root else path.resolve().parent.parent,
         timezone=hours.get("timezone", "Europe/Rome"),
@@ -66,6 +73,8 @@ def load_config(path: Path, root: Path | None = None) -> Config:
         burst_before_reset_h=float(pace.get("burst_before_reset_h", 24.0)),
         stack=build.get("stack", "typescript"),
         default_model=build.get("default_model", "sonnet"),
+        provider=str(runner_section.get("provider", "claude")),
+        allow_metered=bool(safety.get("allow_metered", False)),
         telegram_script=notify.get("telegram_script", "~/.claude/notify-telegram.sh"),
         notify_on=list(notify.get("notify_on", ["done", "needs-review", "paused", "crash"])),
     )
@@ -73,4 +82,9 @@ def load_config(path: Path, root: Path | None = None) -> Config:
         raise ConfigError("pace.max_concurrency must be >= 1")
     if cfg.default_model not in ("sonnet", "opus"):
         raise ConfigError("build.default_model must be sonnet or opus")
+    from autobuild.runner import _BY_NAME as _RUNNERS
+    if cfg.provider not in _RUNNERS:
+        raise ConfigError(
+            f"runner.provider must be one of {', '.join(sorted(_RUNNERS))}, got {cfg.provider!r}"
+        )
     return cfg
