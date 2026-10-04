@@ -114,6 +114,34 @@ Acceptance Criteria, set `status = "pending"`.
 Edit `config/runner.toml` — quiet hours, `max_concurrency`, `opus_escalation`,
 and the optional weekly reserve (`weekly_reserve_enabled` + `weekly_target_usd`).
 
+## Which backend builds run on
+`[runner] provider` picks it:
+
+- `claude` (default) — Claude Code on the subscription seat. A weekly quota, so the
+  pace guard rations it; `sonnet`/`opus` are its own model names.
+- `opencode` — OpenCode against a metered provider, billed per token. There is no weekly
+  quota, so the weekly ceiling / daily cap / burst are skipped and the learned cost
+  ceiling is the budget. The governor's tiers map to real ids via `opencode_model` /
+  `opencode_model_high`, since `sonnet`/`opus` mean nothing there.
+
+`[safety] allow_metered` must be `true` before the daemon will build on a metered
+provider. Unattended overnight builds against a per-token provider are a bill nobody is
+watching, so the daemon starts, reports healthy, and refuses work until you opt in
+explicitly. Two things to know before you do:
+
+- **Containment is weaker on that path.** A seat build is scoped by
+  `--permission-mode bypassPermissions --add-dir ~/autobuild --add-dir <worktree>` — two
+  paths. `opencode run --auto` auto-approves permissions and has no equivalent scoping
+  flag, so it can reach anything the user can. Until builds run inside a real boundary
+  (the deferred user-namespace/Docker isolation), prefer `claude`.
+- **`opencode` must be on the unit's `PATH`.** It usually lives in
+  `~/.local/share/pnpm/bin`, which `deploy/autobuild.service` does not set. The daemon
+  exits 1 with `opencode not found in PATH` rather than failing every build.
+
+`bash deploy/install.sh` installs only the units the configured provider needs: the
+rate-limit oracle and the usage feed exist to meter the seat's weekly quota, so a metered
+provider gets neither, and switching providers retires them.
+
 ## Operator notes
 - **Containment.** `--permission-mode bypassPermissions --add-dir ~/autobuild`
   only *scopes* which directory `claude` is allowed to touch — it is not a
@@ -124,16 +152,23 @@ and the optional weekly reserve (`weekly_reserve_enabled` + `weekly_target_usd`)
   authenticate and that `pnpm install`/`tsc` work end-to-end; if a tool needs to
   write to a path not already in `ReadWritePaths`, add it there. Note the
   `claude` CLI writes `~/.claude.json` (a file *beside* the `~/.claude/`
-  directory) plus a `.claude.json.bak` — both are already listed, but if a
-  future CLI version writes other files in `$HOME` root you may see permission
-  errors. If `claude` still can't persist config under `ProtectSystem=strict`,
-  fall back to `ProtectSystem=true` (protects only `/usr`,`/boot`,`/etc`,
-  leaving `$HOME` writable while keeping `NoNewPrivileges` + the kernel
-  protections).
+  directory), which is listed. Every entry in `ReadWritePaths` is a hard
+  requirement unless prefixed with `-`: an entry naming a path that does not
+  exist makes systemd fail mount namespacing outright, and the daemon never
+  starts. That is not hypothetical — a stale `~/.claude.json.bak` entry did
+  exactly this and cost ~10 days of silently dead daemon (`activating
+  (auto-restart)`, restart counter 8710). Use the `-` prefix for anything
+  optional. If a future CLI version writes other files in `$HOME` root you may
+  see permission errors; if `claude` still can't persist config under
+  `ProtectSystem=strict`, fall back to `ProtectSystem=true` (protects only
+  `/usr`,`/boot`,`/etc`, leaving `$HOME` writable while keeping
+  `NoNewPrivileges` + the kernel protections).
 - **Interpreter.** `ExecStart` uses `/usr/bin/python3`, which must be ≥3.11
   (the runner uses `tomllib`/`zoneinfo`). Adjust the `ExecStart` path if the
   host's default `python3` is older or lives elsewhere.
 - **PATH.** The unit's `Environment=PATH=...` currently lists
   `~/.local/bin:~/.cargo/bin:/usr/local/bin:/usr/bin:/bin`. Make sure
   `node`/`pnpm` resolve on that `PATH` — add the node bin dir (e.g. an
-  nvm install path) if the build/verify steps can't find them.
+  nvm install path) if the build/verify steps can't find them. On a metered
+  provider, `opencode` itself must resolve here too; it usually lives in
+  `~/.local/share/pnpm/bin`, which is *not* in that list.
