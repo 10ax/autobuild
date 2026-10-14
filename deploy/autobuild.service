@@ -12,7 +12,7 @@ StartLimitBurst=5
 [Service]
 Type=simple
 WorkingDirectory=%h/autobuild
-Environment=PATH=%h/.local/bin:%h/.cargo/bin:%h/.nvm/versions/node/v22.16.0/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=%h/.local/bin:%h/.local/share/pnpm/bin:%h/.cargo/bin:%h/.nvm/versions/node/v22.16.0/bin:/usr/local/bin:/usr/bin:/bin
 # GitHub identity for the daemon + all its build subprocesses: the isolated gh config (account
 # 10ax, personal) and 10ax's commit authorship — leaves the user's separate interactive login alone.
 Environment=GH_CONFIG_DIR=%h/.config/gh-autobuild
@@ -28,7 +28,11 @@ ProtectSystem=strict
 ProtectKernelTunables=yes
 ProtectControlGroups=yes
 PrivateTmp=yes
-ReadWritePaths=%h/autobuild %h/.claude %h/.claude.json %h/.npm %h/.cache %h/.config %h/.tokensave %h/.local/state
+# Writable paths under ProtectSystem=strict. The metered (opencode) backend keeps its
+# session/auth DB in ~/.local/share/opencode, so that has to be writable; the Claude-specific
+# ~/.claude and ~/.claude.json are gone (a ReadWritePaths entry naming a nonexistent path is a
+# hard requirement and makes mount namespacing fail — the 8710-restart outage).
+ReadWritePaths=%h/autobuild %h/.local/share/opencode %h/.npm %h/.cache %h/.config %h/.tokensave %h/.local/state
 
 [Install]
 WantedBy=default.target

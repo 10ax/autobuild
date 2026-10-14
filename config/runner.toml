@@ -38,7 +38,7 @@ default_model = "sonnet"
 #                quota to ration, so the weekly ceiling / daily cap / burst are skipped and
 #                the learned cost ceiling is the budget instead.
 [runner]
-provider = "claude"
+provider = "opencode"
 
 [safety]
 # A metered backend bills per token and this daemon builds unattended, typically overnight.
@@ -50,8 +50,8 @@ provider = "claude"
 # --add-dir ~/autobuild --add-dir <worktree>, i.e. exactly two paths. `opencode run --auto`
 # auto-approves permissions but has no equivalent scoping flag, so it can reach anything the
 # user can. That is a wider boundary than the path this replaces.
-allow_metered = false
+allow_metered = true
 
 [notify]
-telegram_script = "~/.claude/notify-telegram.sh"
+telegram_script = "~/.local/bin/notify-telegram.sh"
 notify_on = ["done", "needs-review", "paused", "crash"]
