@@ -14,13 +14,11 @@ Environment=NODE_ENV=production
 Environment=PORT=8787
 Environment=HOST=127.0.0.1
 Environment=AUTOBUILD_HOME=%h/autobuild
-Environment=USAGE_SNAPSHOT_PATH=%h/.claude/usage-snapshot.json
-Environment=USAGE_ORACLE_PATH=%h/.claude/usage-oracle.json
 ExecStart=%h/.nvm/versions/node/v22.16.0/bin/node dist/server.js
 Restart=always
 RestartSec=5
 # Light sandbox: it writes only backlog/*.md and state/pause under ~/autobuild; everything else
-# (state reads, ~/.claude usage JSONs) is read-only, which ProtectSystem=strict still permits.
+# (state reads, the usage JSONs under state/) is read-only, which ProtectSystem=strict still permits.
 # It spawns `systemctl --user is-active`/`journalctl --user` over the user bus for daemon status
 # and the live log tail.
 NoNewPrivileges=yes
