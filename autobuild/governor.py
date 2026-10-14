@@ -167,8 +167,8 @@ def compute_pace(now: datetime, cfg: Config, state: GovernorState,
     # Headroom: prefer a fresh live 5h percentage (exact); else the EMA-learned ceiling;
     # else we are uncalibrated with no live signal → run conservatively. The live 5h % is
     # the seat's window: on a metered backend it describes a different product, and a
-    # leftover statusline reading (the user runs Claude Code interactively on the same
-    # host) would otherwise pace metered work off the wrong meter.
+    # leftover statusline reading (from when the seat was in use on this host, or a stale
+    # file) would otherwise pace metered work off the wrong meter.
     live_pct = signal.used_pct_5h if (signal is not None and not cfg.metered) else None
     if live_pct is not None:
         wh = max(0.0, 1.0 - live_pct / 100.0)

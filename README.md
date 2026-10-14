@@ -117,12 +117,17 @@ and the optional weekly reserve (`weekly_reserve_enabled` + `weekly_target_usd`)
 ## Which backend builds run on
 `[runner] provider` picks it:
 
-- `claude` (default) — Claude Code on the subscription seat. A weekly quota, so the
+- `claude` (the code default) — Claude Code on the subscription seat. A weekly quota, so the
   pace guard rations it; `sonnet`/`opus` are its own model names.
 - `opencode` — OpenCode against a metered provider, billed per token. There is no weekly
   quota, so the weekly ceiling / daily cap / burst are skipped and the learned cost
   ceiling is the budget. The governor's tiers map to real ids via `opencode_model` /
   `opencode_model_high`, since `sonnet`/`opus` mean nothing there.
+
+**This host runs `provider = "opencode"` with `allow_metered = true`** (switched 2026-10-14):
+the Claude seat is gone, so the metered backend is the only path here. The containment
+caveat below was accepted deliberately — the systemd sandbox is the boundary. The
+rate-limit oracle and usage feed are retired on this backend.
 
 `[safety] allow_metered` must be `true` before the daemon will build on a metered
 provider. Unattended overnight builds against a per-token provider are a bill nobody is
@@ -134,41 +139,35 @@ explicitly. Two things to know before you do:
   paths. `opencode run --auto` auto-approves permissions and has no equivalent scoping
   flag, so it can reach anything the user can. Until builds run inside a real boundary
   (the deferred user-namespace/Docker isolation), prefer `claude`.
-- **`opencode` must be on the unit's `PATH`.** It usually lives in
-  `~/.local/share/pnpm/bin`, which `deploy/autobuild.service` does not set. The daemon
-  exits 1 with `opencode not found in PATH` rather than failing every build.
+- **`opencode` must be on the unit's `PATH`.** It lives in `~/.local/share/pnpm/bin`,
+  which `deploy/autobuild.service` sets. The daemon exits 1 with
+  `opencode not found in PATH` rather than failing every build.
 
 `bash deploy/install.sh` installs only the units the configured provider needs: the
 rate-limit oracle and the usage feed exist to meter the seat's weekly quota, so a metered
 provider gets neither, and switching providers retires them.
 
 ## Operator notes
-- **Containment.** `--permission-mode bypassPermissions --add-dir ~/autobuild`
-  only *scopes* which directory `claude` is allowed to touch — it is not a
-  sandbox. The real containment is the systemd sandbox in
-  `deploy/autobuild.service` (`ProtectSystem=strict`, `NoNewPrivileges=yes`,
-  `PrivateTmp=yes`, etc.), which makes the OS enforce a read-only filesystem
-  outside `ReadWritePaths`. On first supervised run, confirm `claude` can
-  authenticate and that `pnpm install`/`tsc` work end-to-end; if a tool needs to
-  write to a path not already in `ReadWritePaths`, add it there. Note the
-  `claude` CLI writes `~/.claude.json` (a file *beside* the `~/.claude/`
-  directory), which is listed. Every entry in `ReadWritePaths` is a hard
-  requirement unless prefixed with `-`: an entry naming a path that does not
-  exist makes systemd fail mount namespacing outright, and the daemon never
-  starts. That is not hypothetical — a stale `~/.claude.json.bak` entry did
-  exactly this and cost ~10 days of silently dead daemon (`activating
-  (auto-restart)`, restart counter 8710). Use the `-` prefix for anything
-  optional. If a future CLI version writes other files in `$HOME` root you may
-  see permission errors; if `claude` still can't persist config under
-  `ProtectSystem=strict`, fall back to `ProtectSystem=true` (protects only
-  `/usr`,`/boot`,`/etc`, leaving `$HOME` writable while keeping
+- **Containment.** On the seat, `--permission-mode bypassPermissions --add-dir
+  ~/autobuild` only *scopes* which directory `claude` may touch — it is not a sandbox.
+  `opencode run --auto` has no equivalent flag, so on the metered backend the only
+  boundary is the systemd sandbox in `deploy/autobuild.service` (`ProtectSystem=strict`,
+  `NoNewPrivileges=yes`, `PrivateTmp=yes`, etc.) — that is why metered mode sits behind
+  `allow_metered`. `ReadWritePaths` lists `%h/autobuild`, `%h/.local/share/opencode`
+  (the metered backend's session/auth DB), and the caches and config dirs. Every entry is
+  a hard requirement unless prefixed with `-`: an entry naming a path that does not exist
+  makes systemd fail mount namespacing outright, and the daemon never starts. That is not
+  hypothetical — a stale `~/.claude.json.bak` entry did exactly this and cost ~10 days of
+  silently dead daemon (`activating (auto-restart)`, restart counter 8710). The seat also
+  wrote `~/.claude` and `~/.claude.json`; both are gone now that the backend is metered.
+  If a future CLI writes other files in `$HOME` root you may see permission errors; if it
+  still can't persist config under `ProtectSystem=strict`, fall back to `ProtectSystem=true`
+  (protects only `/usr`,`/boot`,`/etc`, leaving `$HOME` writable while keeping
   `NoNewPrivileges` + the kernel protections).
 - **Interpreter.** `ExecStart` uses `/usr/bin/python3`, which must be ≥3.11
   (the runner uses `tomllib`/`zoneinfo`). Adjust the `ExecStart` path if the
   host's default `python3` is older or lives elsewhere.
-- **PATH.** The unit's `Environment=PATH=...` currently lists
-  `~/.local/bin:~/.cargo/bin:/usr/local/bin:/usr/bin:/bin`. Make sure
-  `node`/`pnpm` resolve on that `PATH` — add the node bin dir (e.g. an
-  nvm install path) if the build/verify steps can't find them. On a metered
-  provider, `opencode` itself must resolve here too; it usually lives in
-  `~/.local/share/pnpm/bin`, which is *not* in that list.
+- **PATH.** The unit's `Environment=PATH=...` lists
+  `~/.local/bin:~/.local/share/pnpm/bin:~/.cargo/bin:<nvm node bin>:/usr/local/bin:/usr/bin:/bin`.
+  `node`, `pnpm` and `opencode` must all resolve here: `~/.local/share/pnpm/bin` is what
+  makes `opencode` findable, and an nvm node dir supplies `node`.
