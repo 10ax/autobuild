@@ -66,7 +66,8 @@ A6. The docs are written in the language of the repo's existing documentation; E
 
 
 def _git(repo: Path, *args: str) -> str:
-    cp = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+    cp = subprocess.run(["git", "-C", str(repo), *args], capture_output=True,
+                        text=True, check=False)
     return cp.stdout if cp.returncode == 0 else ""
 
 
@@ -173,11 +174,11 @@ def main(argv: list[str]) -> int:
         keep, skip = discover(Path(args.home))
         print(f"{'repo':58s} claude  mine")
         for r in keep:
-            print(f"{str(r['path']):58s} {r['claude']:6d} {r['mine']:5d}")
+            print(f"{r['path']!s:58s} {r['claude']:6d} {r['mine']:5d}")
         if skip:
             print("\nnot proposed:")
             for r in skip:
-                print(f"  {str(r['path']):56s} {r['why']}")
+                print(f"  {r['path']!s:56s} {r['why']}")
     if args.systemd:
         systemd()
     if args.seed:

@@ -21,7 +21,7 @@ jobs:
   ci:
     uses: 10ax/ci-common/.github/workflows/python.yml@v1
     with:
-      python-versions: '["3.12"]'
+      python-versions: '["3.14"]'
       # No manifest in this repo: setup-python's pip cache has nothing to hash.
       cache: ""
       install: python -m pip install pytest pytest-cov 'ruff==0.17.1'
