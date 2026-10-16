@@ -1,8 +1,17 @@
-import tempfile, threading, unittest
+import tempfile
+import threading
+import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from autobuild.backlog import (scan_backlog, select_pending, set_status,
-                               add_lock, read_lock, clear_lock)
+
+from autobuild.backlog import (
+    add_lock,
+    clear_lock,
+    read_lock,
+    scan_backlog,
+    select_pending,
+    set_status,
+)
 
 BRIEF = '''+++
 spec_version = "1.0"
@@ -37,9 +46,9 @@ class TestBacklog(unittest.TestCase):
 
     def test_set_status_persists(self):
         items = scan_backlog(_backlog())
-        target = [i for i in items if i.meta["slug"] == "alpha"][0]
+        target = next(i for i in items if i.meta["slug"] == "alpha")
         set_status(target, "building")
-        again = [i for i in scan_backlog(target.path.parent) if i.meta["slug"] == "alpha"][0]
+        again = next(i for i in scan_backlog(target.path.parent) if i.meta["slug"] == "alpha")
         self.assertEqual(again.meta["status"], "building")
 
     def test_lock_roundtrip(self):

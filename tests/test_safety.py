@@ -15,7 +15,7 @@ from autobuild.safety import metered_guard
 
 
 def cfg(**kw) -> Config:
-    base = dict(root=Path("/tmp/autobuild-safety-test"))
+    base = {"root": Path("/tmp/autobuild-safety-test")}
     base.update(kw)
     return Config(**base)
 

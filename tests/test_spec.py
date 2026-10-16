@@ -1,5 +1,7 @@
-import tempfile, unittest
+import tempfile
+import unittest
 from pathlib import Path
+
 from autobuild.spec import parse_spec, validate_spec
 
 VALID_BRIEF = '''+++

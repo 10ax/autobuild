@@ -1,11 +1,13 @@
 from __future__ import annotations
+
 import json
 import os
 import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from autobuild.spec import parse_spec, SpecDoc
+
+from autobuild.spec import SpecDoc, parse_spec
 
 _STATUS_LINE = re.compile(r'(?m)^(status\s*=\s*)".*?"')
 _LOCK_MUTEX = threading.Lock()

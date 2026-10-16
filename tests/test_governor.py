@@ -1,10 +1,18 @@
 import unittest
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+
 from autobuild.config import Config
+from autobuild.governor import (
+    WINDOW_SECONDS,
+    anchor_window,
+    compute_pace,
+    in_quiet_hours,
+    record_spend,
+    roll_day,
+    update_ceiling_ema,
+)
 from autobuild.ledger import GovernorState
-from autobuild.governor import (in_quiet_hours, compute_pace, record_spend,
-                                update_ceiling_ema, anchor_window, roll_day, WINDOW_SECONDS)
 from autobuild.usage import UsageSignal
 
 TZ = ZoneInfo("Europe/Rome")

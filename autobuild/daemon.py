@@ -1,5 +1,6 @@
 # autobuild/daemon.py
 from __future__ import annotations
+
 import argparse
 import subprocess
 import sys
@@ -8,19 +9,38 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
-from autobuild.config import Config, load_config
-from autobuild.ledger import (GovernorState, load_governor_state, save_governor_state,
-                              append_ledger)
-from autobuild.governor import (Pace, compute_pace, record_spend, update_ceiling_ema,
-                                anchor_window, roll_day, next_active_time)
-from autobuild.backlog import scan_backlog, select_pending, set_status, add_lock, clear_lock, read_lock
-from autobuild.build import run_build, verify_repo, BuildResult
-from autobuild.runner import build_runner
+
 from autobuild import autodoc as _autodoc
-from autobuild import improve as _improve
 from autobuild import implement as _implement
+from autobuild import improve as _improve
 from autobuild.autodoc import AutodocError
+from autobuild.backlog import (
+    add_lock,
+    clear_lock,
+    read_lock,
+    scan_backlog,
+    select_pending,
+    set_status,
+)
+from autobuild.build import BuildResult, run_build, verify_repo
+from autobuild.config import Config, load_config
+from autobuild.governor import (
+    Pace,
+    anchor_window,
+    compute_pace,
+    next_active_time,
+    record_spend,
+    roll_day,
+    update_ceiling_ema,
+)
+from autobuild.ledger import (
+    GovernorState,
+    append_ledger,
+    load_governor_state,
+    save_governor_state,
+)
 from autobuild.notify import notify
+from autobuild.runner import build_runner
 from autobuild.safety import metered_guard
 from autobuild.spec import validate_spec
 from autobuild.usage import read_signal, write_oracle
@@ -328,7 +348,7 @@ def main(argv: list[str]) -> int:
         now = datetime.now(tz)
         try:
             res = run_once(cfg, now, state, state_dir)
-        except Exception as e:  # never die silently
+        except Exception as e:  # noqa: BLE001 — never die silently
             notify(cfg, "crash", error=str(e))
             if args.once:
                 return 1

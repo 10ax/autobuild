@@ -1,6 +1,9 @@
-import tempfile, unittest
+import tempfile
+import unittest
 from pathlib import Path
-from autobuild.config import load_config, ConfigError
+
+from autobuild.config import ConfigError, load_config
+
 
 def _write(text):
     d = Path(tempfile.mkdtemp())

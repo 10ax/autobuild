@@ -10,12 +10,17 @@ import unittest
 from pathlib import Path
 
 from autobuild.config import Config
-from autobuild.runner import (ClaudeSeatRunner, OpenCodeRunner, build_runner,
-                              METERED, SEAT)
+from autobuild.runner import (
+    METERED,
+    SEAT,
+    ClaudeSeatRunner,
+    OpenCodeRunner,
+    build_runner,
+)
 
 
 def cfg(**kw) -> Config:
-    base = dict(root=Path("/tmp/autobuild-runner-test"))
+    base = {"root": Path("/tmp/autobuild-runner-test")}
     base.update(kw)
     return Config(**base)
 

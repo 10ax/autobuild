@@ -9,8 +9,8 @@ import unittest
 from pathlib import Path
 
 from autobuild.autodoc import BEGIN, END, prepare_worktree
-from autobuild.improve import (commit_improve, prepare_worktree as prepare_quality,
-                               verify_improve)
+from autobuild.improve import commit_improve, verify_improve
+from autobuild.improve import prepare_worktree as prepare_quality
 
 SRC = "\n".join(f"def f{i}():\n    return {i}\n" for i in range(5))
 HUMAN_README = "# repo\n\nHand-written prose that must survive untouched.\n"
@@ -58,6 +58,7 @@ class _Runner:
 
     def __call__(self, argv, **kw):
         if isinstance(argv, list) and argv and argv[0] == "git":
+            kw.setdefault("check", False)
             return subprocess.run(argv, **kw)
         self.calls.append((argv, kw))
         rc, out = self.answers.get(argv, (0, ""))
@@ -256,6 +257,7 @@ class _ListRunner(_Runner):
 
     def __call__(self, argv, **kw):
         if isinstance(argv, list) and argv and argv[0] == "git":
+            kw.setdefault("check", False)
             return subprocess.run(argv, **kw)
         self.calls.append((argv, kw))
         key = Path(argv[0]).name if isinstance(argv, list) else argv

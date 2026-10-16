@@ -1,9 +1,12 @@
-import json, tempfile, unittest
-from datetime import datetime, timezone
+import json
+import tempfile
+import unittest
+from datetime import UTC, datetime
 from pathlib import Path
-from autobuild.usage import read_signal, write_oracle, UsageSignal
 
-NOW = datetime(2026, 7, 24, 2, 0, tzinfo=timezone.utc)
+from autobuild.usage import UsageSignal, read_signal, write_oracle
+
+NOW = datetime(2026, 7, 24, 2, 0, tzinfo=UTC)
 NOW_TS = NOW.timestamp()
 
 

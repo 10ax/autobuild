@@ -1,12 +1,14 @@
 from __future__ import annotations
+
 import subprocess
 from pathlib import Path
+
 from autobuild.config import Config
 
 
 def _fmt_dur(seconds) -> str:
     """Human build duration: '45s' under a minute, else '7m03s'."""
-    s = int(round(seconds or 0))
+    s = round(seconds or 0)
     if s < 60:
         return f"{s}s"
     m, r = divmod(s, 60)
@@ -44,5 +46,5 @@ def notify(cfg: Config, event: str, runner=subprocess.run, **kw) -> None:
     msg = format_message(event, **kw)
     try:
         runner([str(script), msg], capture_output=True, text=True, timeout=30)
-    except Exception:
-        pass  # notification must never crash the daemon
+    except Exception:  # noqa: BLE001, S110 — notification must never crash the daemon
+        pass

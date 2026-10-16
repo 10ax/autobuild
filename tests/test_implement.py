@@ -18,7 +18,8 @@ from autobuild.autodoc import AutodocPlan
 from autobuild.backlog import scan_backlog
 from autobuild.build import BuildResult, _lane_prompt
 from autobuild.config import Config
-from autobuild.implement import prepare_worktree as prepare_implement, verify_implement
+from autobuild.implement import prepare_worktree as prepare_implement
+from autobuild.implement import verify_implement
 from autobuild.ledger import GovernorState, read_ledger
 from autobuild.spec import parse_spec, validate_spec
 
@@ -254,13 +255,13 @@ class TestImplementLane(unittest.TestCase):
                          root / "state" / "worktrees" / "implement-target")
         self.assertEqual([c[0] for c in ops.calls], ["prepare", "verify", "commit", "remove"])
 
-        verify = [c for c in ops.calls if c[0] == "verify"][0]
+        verify = next(c for c in ops.calls if c[0] == "verify")
         self.assertEqual(verify[2], ["app/**", "tests/**", "docs/**"])
         self.assertEqual(verify[3], [".venv/bin/pytest -q"])
         self.assertEqual(verify[4], ["tests/test_*.py"])
         self.assertEqual(verify[5], ["docs/REFERENCE.md"])
 
-        commit = [c for c in ops.calls if c[0] == "commit"][0]
+        commit = next(c for c in ops.calls if c[0] == "commit")
         self.assertFalse(commit[2])
         self.assertIn("feat(implement)", commit[4])
         self.assertIn(PLAN_REL, commit[4])          # the commit says which plan it followed
@@ -280,8 +281,8 @@ class TestImplementLane(unittest.TestCase):
              builder=_capture_builder([]), implement_ops=ops, notes=notes, **_sig(root))
 
         self.assertEqual([c[0] for c in ops.calls], ["prepare", "verify", "commit"])
-        self.assertTrue([c for c in ops.calls if c[0] == "commit"][0][2])
-        self.assertIn("WIP", [c for c in ops.calls if c[0] == "commit"][0][4])
+        self.assertTrue(next(c for c in ops.calls if c[0] == "commit")[2])
+        self.assertIn("WIP", next(c for c in ops.calls if c[0] == "commit")[4])
         item = scan_backlog(root / "backlog")[0]
         self.assertEqual(item.meta["status"], "needs-review")
         self.assertIn("pytest", notes[0][1]["reason"])

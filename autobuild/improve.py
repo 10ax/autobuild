@@ -26,12 +26,25 @@ import subprocess
 from pathlib import Path, PurePosixPath
 
 from autobuild import autodoc
-from autobuild.autodoc import (AutodocError, AutodocPlan, _changed, _commit_env, _git,
-                               _outside_markers)
+from autobuild.autodoc import (
+    AutodocError,
+    AutodocPlan,
+    _changed,
+    _commit_env,
+    _git,
+    _outside_markers,
+)
 from autobuild.spec import _PLACEHOLDER
 
-__all__ = ["AutodocError", "AutodocPlan", "prepare_worktree", "verify_improve",
-           "commit_improve", "remove_worktree", "changed_paths"]
+__all__ = [
+    "AutodocError",
+    "AutodocPlan",
+    "changed_paths",
+    "commit_improve",
+    "prepare_worktree",
+    "remove_worktree",
+    "verify_improve",
+]
 
 BRANCH_PREFIX = "quality"
 # Untracked leftovers of installing and running a repo's own toolchain inside the worktree.

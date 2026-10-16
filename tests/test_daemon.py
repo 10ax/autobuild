@@ -1,14 +1,17 @@
 # tests/test_daemon.py
-import json, tempfile, unittest
+import json
+import tempfile
+import unittest
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
-from autobuild.config import Config
-from autobuild.ledger import GovernorState, read_ledger
+
 from autobuild.autodoc import AutodocError, AutodocPlan
-from autobuild.build import BuildResult
 from autobuild.backlog import scan_backlog
+from autobuild.build import BuildResult
+from autobuild.config import Config
 from autobuild.daemon import run_once as _run_once
+from autobuild.ledger import GovernorState, read_ledger
 
 TZ = ZoneInfo("Europe/Rome")
 NIGHT = datetime(2026, 7, 23, 23, tzinfo=TZ)
@@ -66,7 +69,7 @@ class TestDaemon(unittest.TestCase):
             verifier=lambda *a, **k: True, **_sig(root),
         )
         self.assertEqual(res["action"], "built")
-        item = [i for i in scan_backlog(root / "backlog") if i.meta["slug"] == "alpha"][0]
+        item = next(i for i in scan_backlog(root / "backlog") if i.meta["slug"] == "alpha")
         self.assertEqual(item.meta["status"], "done")
         self.assertEqual(read_ledger(root / "state" / "ledger.jsonl")[0]["status"], "done")
 
@@ -83,7 +86,7 @@ class TestMeteredDaemon(unittest.TestCase):
                    verifier=lambda *a, **k: True, **_sig(root))
         self.assertEqual(res["action"], "blocked")
         self.assertIn("metered", res["reason"].lower())
-        item = [i for i in scan_backlog(root / "backlog") if i.meta["slug"] == "alpha"][0]
+        item = next(i for i in scan_backlog(root / "backlog") if i.meta["slug"] == "alpha")
         self.assertEqual(item.meta["status"], "pending")   # untouched, not even marked building
 
     def test_guard_does_not_depend_on_the_metered_flag_being_stamped(self):
@@ -159,7 +162,7 @@ class TestMeteredDaemon(unittest.TestCase):
             builder=lambda *a, **k: BuildResult(is_error=False, cost_usd=0.5),
             verifier=lambda *a, **k: False, **_sig(root),
         )
-        item = [i for i in scan_backlog(root / "backlog") if i.meta["slug"] == "alpha"][0]
+        item = next(i for i in scan_backlog(root / "backlog") if i.meta["slug"] == "alpha")
         self.assertEqual(item.meta["status"], "needs-review")
 
     def test_rate_limited_anchors_window_and_requeues(self):
@@ -172,7 +175,7 @@ class TestMeteredDaemon(unittest.TestCase):
                                                 rate_limited=True, reset_at=reset),
             verifier=lambda *a, **k: True, **_sig(root),
         )
-        item = [i for i in scan_backlog(root / "backlog") if i.meta["slug"] == "alpha"][0]
+        item = next(i for i in scan_backlog(root / "backlog") if i.meta["slug"] == "alpha")
         self.assertEqual(item.meta["status"], "pending")     # requeued, not consumed
         self.assertEqual(st.window_start, reset)             # window anchored to the reset
         self.assertGreater(st.learned_ceiling_usd, 0.0)      # ceiling calibrated from the hit
@@ -235,7 +238,7 @@ class TestMeteredDaemon(unittest.TestCase):
             verifier=lambda *a, **k: True, **_sig(root),
         )
         self.assertEqual(built, [])  # builder never called on an invalid brief
-        item = [i for i in scan_backlog(root / "backlog")][0]
+        item = next(iter(scan_backlog(root / "backlog")))
         self.assertEqual(item.meta["status"], "needs-review")
 
     # --- notifications (must never shell out in tests; content must be human-readable) ---
@@ -301,7 +304,7 @@ class TestMeteredDaemon(unittest.TestCase):
             verifier=lambda *a, **k: True, **sig,
         )
         self.assertEqual(res["action"], "built")   # 20% < 50%, daily delta 0 → runs
-        item = [i for i in scan_backlog(root / "backlog") if i.meta["slug"] == "alpha"][0]
+        item = next(i for i in scan_backlog(root / "backlog") if i.meta["slug"] == "alpha")
         self.assertEqual(item.meta["status"], "done")
 
 
@@ -378,8 +381,8 @@ class TestDocsLane(unittest.TestCase):
         self.assertEqual(seen[0]["work_dir"],
                          root / "state" / "worktrees" / "autodoc-target")
         self.assertEqual([c[0] for c in ops.calls], ["prepare", "verify", "commit", "remove"])
-        self.assertFalse([c for c in ops.calls if c[0] == "commit"][0][2])   # not WIP
-        item = [i for i in scan_backlog(root / "backlog")][0]
+        self.assertFalse(next(c for c in ops.calls if c[0] == "commit")[2])   # not WIP
+        item = next(iter(scan_backlog(root / "backlog")))
         self.assertEqual(item.meta["status"], "done")
         row = read_ledger(root / "state" / "ledger.jsonl")[0]
         self.assertEqual(row["mode"], "document")
@@ -389,14 +392,14 @@ class TestDocsLane(unittest.TestCase):
         self.assertIn("autodoc/2026-07-23", notes[0][1]["branch"])
 
     def test_failed_verify_keeps_the_worktree_and_commits_wip(self):
-        root, target = _doc_root()
+        root, _target = _doc_root()
         ops, notes = _Ops(verify_errors=["dangling anchor in docs/CODE-MAP.md: x.py:9"]), []
         _run(_C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
              builder=_capture_builder([]), autodoc_ops=ops, notes=notes, **_sig(root))
         self.assertEqual([c[0] for c in ops.calls], ["prepare", "verify", "commit"])
-        self.assertTrue([c for c in ops.calls if c[0] == "commit"][0][2])     # WIP commit
+        self.assertTrue(next(c for c in ops.calls if c[0] == "commit")[2])     # WIP commit
         self.assertNotIn("remove", [c[0] for c in ops.calls])                 # left to inspect
-        item = [i for i in scan_backlog(root / "backlog")][0]
+        item = next(iter(scan_backlog(root / "backlog")))
         self.assertEqual(item.meta["status"], "needs-review")
         self.assertEqual(notes[0][0], "needs-review")
         self.assertIn("dangling anchor", notes[0][1]["reason"])
@@ -408,7 +411,7 @@ class TestDocsLane(unittest.TestCase):
         _run(_C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
              builder=_capture_builder(seen), autodoc_ops=ops, **_sig(root))
         self.assertEqual(seen, [])
-        item = [i for i in scan_backlog(root / "backlog")][0]
+        item = next(iter(scan_backlog(root / "backlog")))
         self.assertEqual(item.meta["status"], "needs-review")
 
     def test_rate_limited_document_item_requeues_without_committing(self):
@@ -419,7 +422,7 @@ class TestDocsLane(unittest.TestCase):
              builder=_capture_builder([], is_error=True, rate_limited=True, reset_at=reset),
              autodoc_ops=ops, **_sig(root))
         self.assertNotIn("commit", [c[0] for c in ops.calls])
-        item = [i for i in scan_backlog(root / "backlog")][0]
+        item = next(iter(scan_backlog(root / "backlog")))
         self.assertEqual(item.meta["status"], "pending")
 
     def test_build_item_never_touches_the_docs_lane(self):
@@ -429,7 +432,7 @@ class TestDocsLane(unittest.TestCase):
              builder=lambda *a, **k: BuildResult(is_error=False, cost_usd=0.5),
              verifier=lambda *a, **k: True, autodoc_ops=ops, **_sig(root))
         self.assertEqual(ops.calls, [])
-        item = [i for i in scan_backlog(root / "backlog") if i.meta["slug"] == "alpha"][0]
+        item = next(i for i in scan_backlog(root / "backlog") if i.meta["slug"] == "alpha")
         self.assertEqual(item.meta["status"], "done")
 
 
@@ -500,16 +503,16 @@ class TestQualityLane(unittest.TestCase):
         self.assertEqual(seen[0]["mode"], "improve")
         self.assertEqual(seen[0]["work_dir"], root / "state" / "worktrees" / "quality-target")
         self.assertEqual([c[0] for c in ops.calls], ["prepare", "verify", "commit", "remove"])
-        verify = [c for c in ops.calls if c[0] == "verify"][0]
+        verify = next(c for c in ops.calls if c[0] == "verify")
         self.assertEqual(verify[2], ["README.md", "docs/**", "tests/**", ".github/**"])
         self.assertEqual(verify[3], [".venv/bin/pytest -q"])
         self.assertEqual(verify[4], ["docs/TROUBLESHOOTING.md"])
         self.assertEqual(verify[5], ["README.md"])
-        commit = [c for c in ops.calls if c[0] == "commit"][0]
+        commit = next(c for c in ops.calls if c[0] == "commit")
         self.assertFalse(commit[2])
         self.assertEqual(commit[3], ["README.md", "docs/**", "tests/**", ".github/**"])
         self.assertIn("quality", commit[4])
-        item = [i for i in scan_backlog(root / "backlog")][0]
+        item = next(iter(scan_backlog(root / "backlog")))
         self.assertEqual(item.meta["status"], "done")
         row = read_ledger(root / "state" / "ledger.jsonl")[0]
         self.assertEqual(row["mode"], "improve")
@@ -523,8 +526,8 @@ class TestQualityLane(unittest.TestCase):
         _run(_C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
              builder=_capture_builder([]), improve_ops=ops, notes=notes, **_sig(root))
         self.assertEqual([c[0] for c in ops.calls], ["prepare", "verify", "commit"])
-        self.assertTrue([c for c in ops.calls if c[0] == "commit"][0][2])
-        item = [i for i in scan_backlog(root / "backlog")][0]
+        self.assertTrue(next(c for c in ops.calls if c[0] == "commit")[2])
+        item = next(iter(scan_backlog(root / "backlog")))
         self.assertEqual(item.meta["status"], "needs-review")
         self.assertEqual(notes[0][0], "needs-review")
         self.assertIn("pytest", notes[0][1]["reason"])
@@ -536,5 +539,5 @@ class TestQualityLane(unittest.TestCase):
         _run(_C(root, max_concurrency=1), NIGHT, GovernorState(), root / "state",
              builder=_capture_builder([], is_error=True), improve_ops=ops, **_sig(root))
         self.assertNotIn("verify", [c[0] for c in ops.calls])
-        item = [i for i in scan_backlog(root / "backlog")][0]
+        item = next(iter(scan_backlog(root / "backlog")))
         self.assertEqual(item.meta["status"], "needs-review")

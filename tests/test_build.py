@@ -1,8 +1,13 @@
-import json, subprocess, tempfile, unittest
+import json
+import subprocess
+import tempfile
+import unittest
 from pathlib import Path
+
+from autobuild.build import build_argv, parse_result, run_build, verify_repo
 from autobuild.config import Config
 from autobuild.governor import Pace
-from autobuild.build import build_argv, parse_result, run_build, verify_repo
+
 
 class _CP:  # fake CompletedProcess
     def __init__(self, stdout="", returncode=0):

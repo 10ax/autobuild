@@ -15,12 +15,11 @@ must not run the seat's weekly guard against a metered backend.
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 
-from autobuild.result import BuildResult
 from autobuild.config import Config
+from autobuild.result import BuildResult
 
 SEAT = ("claude",)
 METERED = ("opencode",)
@@ -54,7 +53,7 @@ class Runner:
     def apply_usage(self, usage: dict | None) -> None:
         """Attach cost/usage the backend reports out of band. No-op where the CLI
         already prints cost in its own stream."""
-        return None
+        return
 
     # --- preflight -------------------------------------------------------------------
     def preflight(self) -> str | None:

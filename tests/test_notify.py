@@ -1,6 +1,8 @@
 import unittest
+
 from autobuild.config import Config
 from autobuild.notify import format_message, notify
+
 
 class TestNotify(unittest.TestCase):
     def test_format_done(self):

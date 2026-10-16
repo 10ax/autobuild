@@ -7,8 +7,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from autobuild.autodoc import (BEGIN, DOC_SET, END, AutodocError, commit_docs,
-                               prepare_worktree, remove_worktree, verify_docs)
+from autobuild.autodoc import (
+    BEGIN,
+    DOC_SET,
+    END,
+    AutodocError,
+    commit_docs,
+    prepare_worktree,
+    remove_worktree,
+    verify_docs,
+)
 
 SRC = "\n".join(f"def f{i}():\n    return {i}\n" for i in range(10))       # ~30 lines
 HUMAN_README = "# repo\n\nHand-written prose that must survive untouched.\n"

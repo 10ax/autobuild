@@ -7,7 +7,7 @@ interactive agent session alive around the clock. This decides what to install.
 """
 import unittest
 
-from autobuild.deploy import seat_units, units_for_provider, unit_files
+from autobuild.deploy import seat_units, unit_files, units_for_provider
 
 # Units that only make sense against the seat's weekly quota.
 SEAT_METERING = ("usage-feed.service", "ratelimit-oracle.service", "ratelimit-oracle.timer")

@@ -1,7 +1,14 @@
-import tempfile, unittest
+import tempfile
+import unittest
 from pathlib import Path
-from autobuild.ledger import (append_ledger, read_ledger, GovernorState,
-                              load_governor_state, save_governor_state)
+
+from autobuild.ledger import (
+    append_ledger,
+    load_governor_state,
+    read_ledger,
+    save_governor_state,
+)
+
 
 class TestLedger(unittest.TestCase):
     def test_ledger_roundtrip(self):

@@ -30,8 +30,16 @@ from pathlib import Path
 from autobuild import autodoc, improve
 from autobuild.autodoc import AutodocError, AutodocPlan
 
-__all__ = ["AutodocError", "AutodocPlan", "prepare_worktree", "verify_implement",
-           "commit_implement", "remove_worktree", "changed_paths", "BRANCH_PREFIX"]
+__all__ = [
+    "BRANCH_PREFIX",
+    "AutodocError",
+    "AutodocPlan",
+    "changed_paths",
+    "commit_implement",
+    "prepare_worktree",
+    "remove_worktree",
+    "verify_implement",
+]
 
 BRANCH_PREFIX = "implement"
 

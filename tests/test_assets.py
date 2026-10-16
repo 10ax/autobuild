@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+
 from autobuild.spec import parse_spec, validate_spec
 
 ROOT = Path(__file__).resolve().parent.parent
