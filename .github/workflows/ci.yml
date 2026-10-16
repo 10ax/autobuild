@@ -1,0 +1,27 @@
+name: CI
+
+# The deterministic lane: ruff + pytest + coverage, through the shared workflow.
+# Warnings, not gates: a red run signals, nothing blocks a push.
+#
+# ruff is pinned on purpose: this repo has no dependency manifest, and an
+# unpinned linter would let a new release redden the lane without a code change.
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: 10ax/ci-common/.github/workflows/python.yml@v1
+    with:
+      python-versions: '["3.12"]'
+      install: python -m pip install pytest pytest-cov 'ruff==0.17.1'
+      lint: ruff check .
+      coverage-args: "--cov=autobuild"
