@@ -1,0 +1,12 @@
+# Keep the GitHub Actions current (weekly).
+#
+# GitHub Actions only, on purpose: language dependency bumps are a per-repo
+# decision (some are deliberately excluded).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
