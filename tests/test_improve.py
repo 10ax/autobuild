@@ -58,8 +58,7 @@ class _Runner:
 
     def __call__(self, argv, **kw):
         if isinstance(argv, list) and argv and argv[0] == "git":
-            kw.setdefault("check", False)
-            return subprocess.run(argv, **kw)
+            return subprocess.run(argv, check=kw.pop("check", False), **kw)
         self.calls.append((argv, kw))
         rc, out = self.answers.get(argv, (0, ""))
         if rc == "timeout":
@@ -257,8 +256,7 @@ class _ListRunner(_Runner):
 
     def __call__(self, argv, **kw):
         if isinstance(argv, list) and argv and argv[0] == "git":
-            kw.setdefault("check", False)
-            return subprocess.run(argv, **kw)
+            return subprocess.run(argv, check=kw.pop("check", False), **kw)
         self.calls.append((argv, kw))
         key = Path(argv[0]).name if isinstance(argv, list) else argv
         rc, out = self.answers.get(key, (0, ""))
