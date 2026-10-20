@@ -27,9 +27,7 @@ SPEC_SECTIONS = ["Intent", "Ubiquitous Language", "Domain Model", "Requirements"
                  "Interfaces", "Acceptance Criteria", "Non-Goals", "Constraints"]
 BRIEF_SECTIONS = ["Intent", "Acceptance Criteria"]
 
-_FRONT = re.compile(r"^\+\+\+\s*\n(.*?)\n\+\+\+\s*\n(.*)$", re.DOTALL)
 _PLACEHOLDER = re.compile(r"^(tbd|todo|\.\.\.|xxx|n/a)\b", re.IGNORECASE)
-_H2 = re.compile(r"^##\s+(.*\S)\s*$")
 _SLUG = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 
@@ -41,22 +39,48 @@ class SpecDoc:
     path: Path | None = None
 
 
+def _split_front_matter(text: str) -> tuple[str, str] | None:
+    """Split the TOML front matter from the body without a backtracking regex."""
+    text = text.lstrip("\ufeff").lstrip()
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].rstrip() != "+++":
+        return None
+    for index in range(1, len(lines)):
+        if lines[index].rstrip() != "+++":
+            continue
+        if not lines[index].endswith(("\n", "\r")):
+            return None
+        return "".join(lines[1:index]), "".join(lines[index + 1:])
+    return None
+
+
+def _h2_title(line: str) -> str | None:
+    if not line.startswith("##"):
+        return None
+    rest = line[2:]
+    if not rest or not rest[0].isspace():
+        return None
+    title = rest.strip()
+    return title or None
+
+
 def parse_spec(text: str) -> SpecDoc:
-    m = _FRONT.match(text.lstrip("﻿").lstrip())
-    if not m:
+    front = _split_front_matter(text)
+    if front is None:
         return SpecDoc(meta={}, sections={}, raw=text)
+    meta_text, body = front
     try:
-        meta = tomllib.loads(m.group(1))
+        meta = tomllib.loads(meta_text)
     except tomllib.TOMLDecodeError:
         return SpecDoc(meta={}, sections={}, raw=text)  # unparseable → empty meta (won't be selected)
     sections: dict[str, str] = {}
     cur, buf = None, []
-    for line in m.group(2).splitlines():
-        h = _H2.match(line)
+    for line in body.splitlines():
+        h = _h2_title(line)
         if h:
             if cur is not None:
                 sections[cur] = "\n".join(buf).strip()
-            cur, buf = h.group(1).strip(), []
+            cur, buf = h, []
         elif cur is not None:
             buf.append(line)
     if cur is not None:
