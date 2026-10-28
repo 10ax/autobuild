@@ -89,9 +89,14 @@ _LANE_PROMPTS = {
         "repo {REPO}. Read and write ONLY inside the worktree {WORKTREE} (a git worktree of "
         "that repo — cd there first). Follow the process in {ROOT}/IMPLEMENT.md exactly."
     ),
+    "review": (
+        "Check the finished build of the brief {BRIEF_PATH} in {REPO}. You did not write any "
+        "of it: read the repo, run nothing that writes, and follow the process in "
+        "{ROOT}/prompts/review.md exactly."
+    ),
 }
 _LANE_PROMPT_FILES = {"document": "autodoc.md", "improve": "improve.md",
-                      "implement": "implement.md"}
+                      "implement": "implement.md", "review": "review.md"}
 
 
 def _lane_prompt(mode: str, brief_path: Path, repo_root: Path, work_dir: Path,
@@ -212,7 +217,7 @@ def parse_result(stdout: str) -> BuildResult:
 def run_build(brief_path: Path, repo_root: Path, model: str, pace: Pace,
               cfg: Config, mode: str = "build", work_dir: Path | None = None,
               runner=subprocess.run, clock=time.monotonic,
-              provider_runner=None) -> BuildResult:
+              provider_runner=None, timeout_min: float | None = None) -> BuildResult:
     # `runner` is the injectable process runner tests stand in for; `provider_runner` is
     # the backend (seat vs metered). Keeping them separate means every existing test that
     # fakes the process call keeps working, and the backend stays swappable.
@@ -228,7 +233,7 @@ def run_build(brief_path: Path, repo_root: Path, model: str, pace: Pace,
     start = clock()
     try:
         cp = runner(argv, capture_output=True, text=True,
-                    timeout=cfg.per_project_timeout_min * 60, env=env,
+                    timeout=(timeout_min or cfg.per_project_timeout_min) * 60, env=env,
                     **({"cwd": str(work_dir)} if work_dir else {}))
     except subprocess.TimeoutExpired as e:
         # A killed build's captured stdout may still carry cost / a rate_limit_event — recover what

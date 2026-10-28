@@ -48,6 +48,16 @@ class Config:
     # Set by the daemon from the resolved runner. NOT read from the toml: a flag that
     # could be typed by hand is a flag that can disagree with the backend actually used.
     metered: bool = False
+    # The checker pass on the build lane: a fresh run that did not write the code judges
+    # whether a green build is done. Off unless configured — `verify_repo` alone is the
+    # old behaviour, and a Config built in a unit test should not shell out to a model.
+    reviewer_enabled: bool = False
+    # Which tier checks. "sonnet" is the cheap one and the default: the checker's value is
+    # fresh eyes on a build it did not write, not a bigger model re-reading it — and this
+    # runs on every build, so its cost is multiplied by the whole night. "auto" picks the
+    # opposite of the build's tier; "opus" pins the strong one.
+    reviewer_tier: str = "sonnet"
+    reviewer_timeout_min: int = 20
     telegram_script: str = "~/.claude/notify-telegram.sh"
     notify_on: list[str] = field(
         default_factory=lambda: ["done", "needs-review", "paused", "crash"]
@@ -62,6 +72,7 @@ def load_config(path: Path, root: Path | None = None) -> Config:
     hours, pace = data.get("hours", {}), data.get("pace", {})
     build, notify = data.get("build", {}), data.get("notify", {})
     runner_section, safety = data.get("runner", {}), data.get("safety", {})
+    reviewer = data.get("reviewer", {})
     cfg = Config(
         root=Path(root).resolve() if root else path.resolve().parent.parent,
         timezone=hours.get("timezone", "Europe/Rome"),
@@ -83,6 +94,9 @@ def load_config(path: Path, root: Path | None = None) -> Config:
         default_model=build.get("default_model", "sonnet"),
         provider=str(runner_section.get("provider", "claude")),
         allow_metered=bool(safety.get("allow_metered", False)),
+        reviewer_enabled=bool(reviewer.get("enabled", False)),
+        reviewer_tier=str(reviewer.get("tier", "sonnet")).lower(),
+        reviewer_timeout_min=int(reviewer.get("timeout_min", 20)),
         telegram_script=notify.get("telegram_script", "~/.claude/notify-telegram.sh"),
         notify_on=list(notify.get("notify_on", ["done", "needs-review", "paused", "crash"])),
     )
@@ -90,6 +104,10 @@ def load_config(path: Path, root: Path | None = None) -> Config:
         raise ConfigError("pace.max_concurrency must be >= 1")
     if cfg.default_model not in ("sonnet", "opus"):
         raise ConfigError("build.default_model must be sonnet or opus")
+    if cfg.reviewer_tier not in ("auto", "sonnet", "opus"):
+        raise ConfigError("reviewer.tier must be auto, sonnet or opus")
+    if cfg.reviewer_timeout_min < 1:
+        raise ConfigError("reviewer.timeout_min must be >= 1")
     from autobuild.runner import _BY_NAME as _RUNNERS
     if cfg.provider not in _RUNNERS:
         raise ConfigError(

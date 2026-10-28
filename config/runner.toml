@@ -55,3 +55,16 @@ allow_metered = true
 [notify]
 telegram_script = "~/.local/bin/notify-telegram.sh"
 notify_on = ["done", "needs-review", "paused", "crash"]
+
+[reviewer]
+# The build lane's `done` gate beyond `verify`: a fresh run on the opposite model tier,
+# which wrote nothing, must accept the work. An unparseable verdict is a refusal, so a
+# broken checker sends items to needs-review rather than promoting them unchecked.
+enabled = true
+# Which model checks. "sonnet" is the cheap tier and the point is fresh eyes, not a bigger
+# reader: this run happens once per build, all night. "auto" = the opposite of the build
+# tier, "opus" = pin the strong one.
+tier = "sonnet"
+# The checker reads a whole repo; 20 minutes is generous for reading and refuses to be a
+# second build.
+timeout_min = 20

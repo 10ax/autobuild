@@ -40,6 +40,7 @@ from autobuild.ledger import (
     save_governor_state,
 )
 from autobuild.notify import notify
+from autobuild.review import review_build
 from autobuild.runner import build_runner
 from autobuild.safety import metered_guard
 from autobuild.spec import validate_spec
@@ -186,7 +187,7 @@ def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
              runner=subprocess.run, verifier=verify_repo, builder=run_build,
              oracle_path=None, snapshot_path=None, notifier=notify,
              autodoc_ops=_autodoc, improve_ops=_improve,
-             implement_ops=_implement) -> dict:
+             implement_ops=_implement, reviewer=review_build) -> dict:
     state_dir = Path(state_dir)
     lock_path = state_dir / "current.lock"
     ledger_path = state_dir / "ledger.jsonl"
@@ -304,9 +305,23 @@ def run_once(cfg: Config, now: datetime, state: GovernorState, state_dir: Path,
                 status, extra, note = _finish_implement(it, repo, plan, res, implement_ops,
                                                         runner)
             else:
-                green = (not res.is_error) and verifier(repo, runner=runner)
+                tests_green = (not res.is_error) and verifier(repo, runner=runner)
+                green = tests_green
+                extra, note = {}, {"tests": "green" if tests_green else "red"}
+                if tests_green and cfg.reviewer_enabled:
+                    # The maker wrote the code and its tests; a green suite is its own
+                    # homework graded by itself. One fresh run on another tier must accept
+                    # before this item is done, and a missing verdict is a refusal.
+                    checked = reviewer(it.path, repo, pace.model, pace, cfg,
+                                       runner=runner, builder=builder)
+                    record_spend(state, (checked.result.cost_usd
+                                         if checked.result is not None else 0.0), now)
+                    green = checked.accepted
+                    extra["review"] = checked.verdict or "no-verdict"
+                    note["review_tier"] = checked.tier
+                    if not green and checked.reason:
+                        note["reason"] = checked.reason
                 status = "done" if green else "needs-review"
-                extra, note = {}, {"tests": "green" if green else "red"}
             set_status(it, status)
             append_ledger(ledger_path, {"slug": slug, "status": status,
                                         "cost_usd": res.cost_usd, "duration_s": res.duration_s,

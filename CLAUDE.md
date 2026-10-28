@@ -58,6 +58,13 @@ for code research. After scaffolding, keep the graph current with `tokensave syn
    `pnpm exec tsc --noEmit` must BOTH pass. Do not claim success without green
    output. The controller re-runs these itself and reads the manager off the
    lockfile, so a pnpm project must carry `pnpm-lock.yaml` in its first commit.
+   Green is necessary and not sufficient: when `[reviewer] enabled` is set, a
+   separate run that wrote none of this, reads the
+   brief and the repo and must accept before the item is `done`. A refusal or a
+   missing verdict sends it to `needs-review` with the checker's reasons.
+   Write for that reader: every Acceptance Criterion needs a check that fails if
+   the behaviour is removed, and the tests must prove the code does what the docs
+   claim — not merely assert what the code happens to do.
 6. **Progress + finish.** Keep `PROGRESS.md` updated (what's done, what's next) so
    a killed run resumes cleanly. If a `$PACE`/rate-limit interruption stopped you
    mid-build, on the next run continue from `PROGRESS.md`.
