@@ -73,3 +73,17 @@ for code research. After scaffolding, keep the graph current with `tokensave syn
      and stop.
 7. Your final message is the JSON `--output-format` result (the controller reads
    `total_cost_usd`, `usage`, and error state). Do not print anything after it.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `10ax/autobuild`, through the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, label strings unchanged. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
